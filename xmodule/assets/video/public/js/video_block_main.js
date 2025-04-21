@@ -10,6 +10,10 @@ import {VideoPlaySkipControl} from './play_skip_control';
 import {VideoPlayPauseControl} from './play_pause_control';
 import {VideoSocialSharingHandler} from './video_social_sharing';
 import VideoCaption from "./video_caption";
+import VideoContextMenu from "./video_context_menu";
+import VideoSpeedControl from "./video_speed_control";
+import VideoTranscriptFeedback from "./video_transcript_feedback";
+import VideoVolumeControl from "./video_volume_control"
 
 
 // TODO: Uncomment the imports
@@ -18,16 +22,12 @@ import VideoCaption from "./video_caption";
 //     FocusGrabber,
 //     VideoControl,
 //     VideoProgressSlider,
-//     VideoSpeedControl,
-//     VideoVolumeControl,
 //     VideoQualityControl,
 //     VideoFullScreen,
 //     VideoCommands,
-//     VideoContextMenu,
 //     VideoSaveStatePlugin,
 //     VideoEventsPlugin,
 //     VideoCompletionHandler,
-//     VideoTranscriptFeedback,
 //     VideoAutoAdvanceControl,
 //     VideoEventsBumperPlugin,
 //     VideoBumper,
@@ -64,17 +64,17 @@ console.log('In video_block_main.js file');
             VideoPlayPlaceholder,
             VideoPlayPauseControl,
             //     VideoProgressSlider,
-            //     VideoSpeedControl,
-            //     VideoVolumeControl,
+            VideoSpeedControl,
+            VideoVolumeControl,
             //     VideoQualityControl,
             //     VideoFullScreen,
-                VideoCaption,
+            VideoCaption,
             //     VideoCommands,
-            //     VideoContextMenu,
+            VideoContextMenu,
             //     VideoSaveStatePlugin,
             //     VideoEventsPlugin,
             //     VideoCompletionHandler,
-            //     VideoTranscriptFeedback,
+            VideoTranscriptFeedback,
             // ].concat(autoAdvanceEnabled ? [VideoAutoAdvanceControl] : []);
         ]
 
@@ -82,11 +82,11 @@ console.log('In video_block_main.js file');
             // VideoControl,
             VideoPlaySkipControl,
             VideoSkipControl,
-            // VideoVolumeControl,
+            VideoVolumeControl,
             VideoCaption,
             // VideoCommands,
             // VideoSaveStatePlugin,
-            // VideoTranscriptFeedback,
+            VideoTranscriptFeedback,
             // VideoEventsBumperPlugin,
             // VideoCompletionHandler,
         ];
