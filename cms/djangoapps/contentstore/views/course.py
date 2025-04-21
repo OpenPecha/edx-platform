@@ -742,6 +742,24 @@ def _deprecated_blocks_info(course_block, deprecated_block_types):
     return data
 
 
+def activate_school_admin_check(request, course_key):
+    overview = CourseOverview.objects.get(id=course_key)
+    try:
+        partner = overview.enhancedcourse.partner
+    except AttributeError:
+        return None
+    if partner:
+        if partner.activate_school_admin:
+            if not hasattr(request.user, 'extended_profile'):
+                return render_to_response('unauthorized.html', {'partner': partner})
+            else:
+                user_partner = request.user.extended_profile.partner
+                if not user_partner:
+                    return render_to_response('unauthorized.html', {'partner': partner})
+                elif partner.id != user_partner.id:
+                    return render_to_response('unauthorized.html', {'partner': partner})
+
+
 @login_required
 @ensure_csrf_cookie
 def course_index(request, course_key):
@@ -750,6 +768,9 @@ def course_index(request, course_key):
 
     org, course, name: Attributes of the Location for the item to edit
     """
+    response = activate_school_admin_check(request, course_key)
+    if response:
+        return response
     block_to_show = request.GET.get("show")
     return redirect(get_course_outline_url(course_key, block_to_show))
 
@@ -1173,6 +1194,9 @@ def settings_handler(request, course_key_string):  # lint-amnesty, pylint: disab
             if use_new_schedule_details_page(course_key):
                 return redirect(get_schedule_details_url(course_key))
             settings_context = get_course_settings(request, course_key, course_block)
+            response = activate_school_admin_check(request, course_key)
+            if response:
+                return response
             return render_to_response('settings.html', settings_context)
         elif 'application/json' in request.META.get('HTTP_ACCEPT', ''):  # pylint: disable=too-many-nested-blocks
             if request.method == 'GET':
