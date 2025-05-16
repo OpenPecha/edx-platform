@@ -6,7 +6,13 @@ Implement CourseTab
 import logging
 from abc import ABCMeta
 
-from django.core.files.storage import get_storage_class
+# Allow for Django's storage package layout:
+try:
+    # when storage is a package, get_storage_class lives in storage/storage.py
+    from django.core.files.storage.storage import get_storage_class
+except ImportError:
+    # fallback for older layouts
+    from django.core.files.storage import get_storage_class
 from xblock.fields import List
 
 from edx_django_utils.plugins import PluginError
