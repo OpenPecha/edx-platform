@@ -1951,6 +1951,7 @@ LANGUAGES = [
     ('bg-bg', 'български (България)'),  # Bulgarian (Bulgaria)
     ('bn-bd', 'বাংলা (বাংলাদেশ)'),  # Bengali (Bangladesh)
     ('bn-in', 'বাংলা (ভারত)'),  # Bengali (India)
+    ('bo', 'བོད་ཡིག (Tibetan)'),  # Tibetan
     ('bs', 'bosanski'),  # Bosnian
     ('ca', 'Català'),  # Catalan
     ('ca@valencia', 'Català (València)'),  # Catalan (Valencia)
