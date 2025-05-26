@@ -49,6 +49,7 @@ from cms.djangoapps.contentstore.toggles import (
     use_new_course_team_page,
     use_new_home_page,
     use_new_import_page,
+    use_new_problem_editor,
     use_new_schedule_details_page,
     use_new_text_editor,
     use_new_textbooks_page,
@@ -279,7 +280,7 @@ def get_editor_page_base_url(course_locator) -> str:
     Gets course authoring microfrontend URL for links to the new base editors
     """
     editor_url = None
-    if use_new_text_editor() or use_new_video_editor():
+    if use_new_text_editor() or use_new_video_editor() or use_new_problem_editor():
         mfe_base_url = get_course_authoring_url(course_locator)
         course_mfe_url = f'{mfe_base_url}/course/{course_locator}/editor'
         if mfe_base_url:
