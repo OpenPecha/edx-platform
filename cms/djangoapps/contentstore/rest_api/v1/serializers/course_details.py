@@ -8,20 +8,56 @@ from openedx.core.lib.api.serializers import CourseKeyField
 
 
 class InstructorInfoSerializer(serializers.Serializer):
-    """ Serializer for instructor info """
+    """ 
+    Serializer for instructor info.
+    
+    This serializer handles both dictionary-like objects with specific fields
+    and string values that represent the instructor's name.
+    """
     name = serializers.CharField(allow_blank=True, required=False)
     title = serializers.SerializerMethodField()
     organization = serializers.CharField(allow_blank=True, required=False)
     image = serializers.CharField(allow_blank=True, required=False)
     bio = serializers.CharField(allow_blank=True, required=False)
+    
+    def to_representation(self, instance):
+        """
+        Handle both dictionary-like objects and string values.
+        If instance is a string, treat it as the instructor name.
+        """
+        if isinstance(instance, str):
+            # If the instructor info is just a string, treat it as the name
+            return {'name': instance}
+        # Otherwise, use the default serialization
+        return super().to_representation(instance)
 
     def get_title(self, obj):
         return obj.title() if isinstance(obj, str) else ""
 
 
 class InstructorsSerializer(serializers.Serializer):
-    """ Serializer for instructors """
+    """ 
+    Serializer for instructors.
+    
+    This handles the list of instructors and ensures proper validation.
+    """
     instructors = InstructorInfoSerializer(many=True, allow_empty=True, allow_null=True, required=False)
+    
+    def to_representation(self, instance):
+        """
+        Ensure that the instructors field is properly handled.
+        If instance is None or not a list/dict, return an empty instructors list.
+        """
+        if instance is None:
+            return {'instructors': []}
+            
+        # If instructors is a list of strings, convert each to a dict with name
+        if isinstance(instance, dict) and 'instructors' in instance:
+            instructors = instance['instructors']
+            if instructors and all(isinstance(item, str) for item in instructors):
+                return {'instructors': [{'name': item} for item in instructors]}
+                
+        return super().to_representation(instance)
 
 
 class CourseDetailsSerializer(serializers.Serializer):
