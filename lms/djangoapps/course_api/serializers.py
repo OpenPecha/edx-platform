@@ -116,6 +116,7 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
     mobile_available = serializers.BooleanField()
     hidden = serializers.SerializerMethodField()
     invitation_only = serializers.BooleanField()
+    duration = serializers.SerializerMethodField()
 
     # 'course_id' is a deprecated field, please use 'id' instead.
     course_id = serializers.CharField(source='id', read_only=True)
@@ -137,6 +138,32 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
             urllib.parse.urlencode({'course_id': course_overview.id}),
         ])
         return self.context['request'].build_absolute_uri(base_url)
+        
+    # Cache for course details to avoid repeated lookups
+    _course_details_cache = {}
+    
+    def get_duration(self, course_overview):
+        """
+        Get the course duration from course details.
+        Uses a class-level cache to avoid repeated lookups.
+        """
+        # First check if the duration is already in the course_overview object
+        if hasattr(course_overview, 'duration') and course_overview.duration:
+            return course_overview.duration
+            
+        # Check if we've already fetched this course's details
+        course_id_str = str(course_overview.id)
+        if course_id_str not in self.__class__._course_details_cache:
+            try:
+                # Fetch and cache the course details
+                from openedx.core.djangoapps.models.course_details import CourseDetails
+                self.__class__._course_details_cache[course_id_str] = CourseDetails.fetch(course_overview.id)
+            except (ImportError, AttributeError):
+                self.__class__._course_details_cache[course_id_str] = None
+        
+        # Get duration from cached course details
+        course_details = self.__class__._course_details_cache.get(course_id_str)
+        return getattr(course_details, 'duration', None)
 
 
 class CourseDetailSerializer(CourseSerializer):  # pylint: disable=abstract-method

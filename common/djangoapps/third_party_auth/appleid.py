@@ -75,7 +75,7 @@ import json
 import time
 
 import jwt
-from jwt.algorithms import RSAAlgorithm
+from jwt.algorithms import RSAAlgorithm, ECAlgorithm
 from jwt.exceptions import PyJWTError
 
 from django.apps import apps
@@ -124,7 +124,7 @@ class AppleIdAuth(BaseOAuth2):
         Return contents of the private key file. Override this method to provide
         secret key from another source if needed.
         """
-        return self.setting('SECRET')
+        return self.setting('PRIVATE_KEY')
 
     def generate_client_secret(self):
         now = int(time.time())
@@ -147,7 +147,7 @@ class AppleIdAuth(BaseOAuth2):
 
     def get_key_and_secret(self):
         client_id = self.setting('CLIENT')
-        client_secret = self.generate_client_secret()
+        client_secret = self.setting('SECRET')
         return client_id, client_secret
 
     def get_apple_jwk(self, kid=None):
@@ -174,12 +174,24 @@ class AppleIdAuth(BaseOAuth2):
 
         try:
             kid = jwt.get_unverified_header(id_token).get('kid')
-            public_key = RSAAlgorithm.from_jwk(self.get_apple_jwk(kid))
+            jwk_data = self.get_apple_jwk(kid)
+            
+            # Determine the correct algorithm based on the key type
+            jwk_dict = json.loads(jwk_data)
+            if jwk_dict.get('kty') == 'RSA':
+                public_key = RSAAlgorithm.from_jwk(jwk_data)
+                algorithm = 'RS256'
+            elif jwk_dict.get('kty') ==  'EC':
+                public_key = ECAlgorithm.from_jwk(jwk_data)
+                algorithm = 'ES256'
+            else:
+                raise AuthFailed(self, f"Unsupported key type: {jwk_dict.get('kty')}")
+                
             decoded = jwt.decode(
                 id_token,
                 key=public_key,
                 audience=self.get_audience(),
-                algorithms=['RS256'],
+                algorithms=[algorithm], 
             )
         except PyJWTError:
             raise AuthFailed(self, 'Token validation failed')
