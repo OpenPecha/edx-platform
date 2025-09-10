@@ -116,7 +116,12 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
     mobile_available = serializers.BooleanField()
     hidden = serializers.SerializerMethodField()
     invitation_only = serializers.BooleanField()
+    # fields enabled by the extended course detail flag
     duration = serializers.SerializerMethodField()
+    course_requirement = serializers.SerializerMethodField()
+    description = serializers.SerializerMethodField()
+    learning_outcomes = serializers.SerializerMethodField()
+    instructors = serializers.SerializerMethodField()
 
     # 'course_id' is a deprecated field, please use 'id' instead.
     course_id = serializers.CharField(source='id', read_only=True)
@@ -164,6 +169,69 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
         # Get duration from cached course details
         course_details = self.__class__._course_details_cache.get(course_id_str)
         return getattr(course_details, 'duration', None)
+
+    def _get_course_details(self, course_overview):
+        """Helper to get cached CourseDetails for a course_overview."""
+        course_id_str = str(course_overview.id)
+        if course_id_str not in self.__class__._course_details_cache:
+            try:
+                from openedx.core.djangoapps.models.course_details import CourseDetails
+                self.__class__._course_details_cache[course_id_str] = CourseDetails.fetch(course_overview.id)
+            except (ImportError, AttributeError):
+                self.__class__._course_details_cache[course_id_str] = None
+        return self.__class__._course_details_cache.get(course_id_str)
+
+    def get_course_requirement(self, course_overview):
+        """
+        Return the course requirement value configured in Studio.
+
+        This maps to the CourseDetails "title" marketing field in Studio,
+        which in this deployment is used to capture course requirements.
+        """
+        details = self._get_course_details(course_overview)
+        return getattr(details, 'title', None) if details else None
+
+    def get_description(self, course_overview):
+        """
+        Return the long description (Studio "description") from CourseDetails.
+        Note: This is distinct from the 'overview' field provided on the detail endpoint.
+        """
+        details = self._get_course_details(course_overview)
+        return getattr(details, 'description', None) if details else None
+
+    def get_learning_outcomes(self, course_overview):
+        """
+        Return learning outcomes as a list of strings from CourseDetails.learning_info.
+        """
+        details = self._get_course_details(course_overview)
+        outcomes = getattr(details, 'learning_info', None) if details else None
+        # Ensure we only return list[str] or None
+        if isinstance(outcomes, (list, tuple)):
+            return [o for o in outcomes if isinstance(o, str)]
+        return None
+
+    def get_instructors(self, course_overview):
+        """
+        Return instructor details excluding media. Each item includes
+        name, title, organization, and bio.
+        """
+        details = self._get_course_details(course_overview)
+        instructor_info = getattr(details, 'instructor_info', None) if details else None
+        instructors = []
+        try:
+            raw_list = (instructor_info or {}).get('instructors', [])
+        except AttributeError:
+            raw_list = []
+        for ins in raw_list:
+            if not isinstance(ins, dict):
+                continue
+            instructors.append({
+                'name': ins.get('name'),
+                'title': ins.get('title'),
+                'organization': ins.get('organization'),
+                'bio': ins.get('bio'),
+            })
+        return instructors or None
 
 
 class CourseDetailSerializer(CourseSerializer):  # pylint: disable=abstract-method
