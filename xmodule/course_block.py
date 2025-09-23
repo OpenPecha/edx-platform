@@ -1063,9 +1063,30 @@ class CourseFields:  # lint-amnesty, pylint: disable=missing-class-docstring
     )
 
 
+class CustomCourseFields:
+    """
+    Defines custom fields for CourseBlock extension.
+    """
+
+    duration_value = Integer(
+        display_name="Duration Value",
+        help="Positive integer indicating the course duration",
+        scope=Scope.content,
+        values={"min": 1},
+    )
+
+    duration_unit = String(
+        display_name="Duration Unit",
+        help="Select the unit for course duration",
+        scope=Scope.content,
+        default="Days",
+    )
+
+
 class CourseBlock(
     CourseFields,
     SequenceBlock,
+    CustomCourseFields,
     LicenseMixin,
 ):  # pylint: disable=abstract-method
     """
