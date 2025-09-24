@@ -22,7 +22,7 @@ ABOUT_ATTRIBUTES = [
     'syllabus',
     'title',
     'subtitle',
-    'duration',
+    # 'duration',   // Using new duration_value and duration_unit fields instead
     'description',
     'short_description',
     'overview',
