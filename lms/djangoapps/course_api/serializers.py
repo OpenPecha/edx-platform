@@ -143,32 +143,45 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
             urllib.parse.urlencode({'course_id': course_overview.id}),
         ])
         return self.context['request'].build_absolute_uri(base_url)
-        
+
     # Cache for course details to avoid repeated lookups
     _course_details_cache = {}
-    
+
     def get_duration(self, course_overview):
         """
         Get the course duration from course details.
         Uses a class-level cache to avoid repeated lookups.
         """
-        # First check if the duration is already in the course_overview object
-        if hasattr(course_overview, 'duration') and course_overview.duration:
-            return course_overview.duration
-            
         # Check if we've already fetched this course's details
         course_id_str = str(course_overview.id)
         if course_id_str not in self.__class__._course_details_cache:
             try:
                 # Fetch and cache the course details
                 from openedx.core.djangoapps.models.course_details import CourseDetails
-                self.__class__._course_details_cache[course_id_str] = CourseDetails.fetch(course_overview.id)
+                self.__class__._course_details_cache[course_id_str] = (
+                    CourseDetails.fetch(course_overview.id)
+                )
             except (ImportError, AttributeError):
                 self.__class__._course_details_cache[course_id_str] = None
-        
+
         # Get duration from cached course details
         course_details = self.__class__._course_details_cache.get(course_id_str)
-        return getattr(course_details, 'duration', None)
+
+        if (
+            course_details
+            and getattr(course_details, "duration_value", None)
+            and getattr(course_details, "duration_unit", None)
+        ):
+            value = course_details.duration_value
+            unit = course_details.duration_unit
+
+            # Singularize if needed
+            if value == 1 and unit.endswith("s"):
+                unit = unit[:-1]
+
+            return f"{value} {unit}"
+
+        return None
 
     def _get_course_details(self, course_overview):
         """Helper to get cached CourseDetails for a course_overview."""
