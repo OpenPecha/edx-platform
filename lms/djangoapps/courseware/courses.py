@@ -371,11 +371,25 @@ def get_course_about_section(request, course, section_key):
     - effort
     - more_info
     - ocw_links
+    - duration (with some custom handling)
     """
 
     # Many of these are stored as html files instead of some semantic
     # markup. This can change without effecting this interface when we find a
     # good format for defining so many snippets of text/html.
+
+    # Custom handling for duration fields
+    if section_key in ["duration", "duration_value", "duration_unit"]:
+        if course.duration_value and course.duration_unit:
+            unit = course.duration_unit
+            value = course.duration_value
+
+            # Singularize if needed
+            if value == 1 and unit.endswith("s"):
+                unit = unit[:-1]
+
+            return f"{value} {unit}"
+        return None
 
     html_sections = {
         'short_description',
