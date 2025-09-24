@@ -157,7 +157,6 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
         if course_id_str not in self.__class__._course_details_cache:
             try:
                 # Fetch and cache the course details
-                from openedx.core.djangoapps.models.course_details import CourseDetails
                 self.__class__._course_details_cache[course_id_str] = (
                     CourseDetails.fetch(course_overview.id)
                 )
@@ -188,7 +187,6 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
         course_id_str = str(course_overview.id)
         if course_id_str not in self.__class__._course_details_cache:
             try:
-                from openedx.core.djangoapps.models.course_details import CourseDetails
                 self.__class__._course_details_cache[course_id_str] = CourseDetails.fetch(course_overview.id)
             except (ImportError, AttributeError):
                 self.__class__._course_details_cache[course_id_str] = None
