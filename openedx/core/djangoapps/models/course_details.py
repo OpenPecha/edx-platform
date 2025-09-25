@@ -22,7 +22,7 @@ ABOUT_ATTRIBUTES = [
     'syllabus',
     'title',
     'subtitle',
-    'duration',
+    # 'duration',   // Using new duration_value and duration_unit fields instead
     'description',
     'short_description',
     'overview',
@@ -78,6 +78,8 @@ class CourseDetails:
         self.self_paced = None
         self.learning_info = []
         self.instructor_info = []
+        self.duration_value = None
+        self.duration_unit = "Days"
 
     @classmethod
     def fetch_about_attribute(cls, course_key, attribute):
@@ -130,6 +132,8 @@ class CourseDetails:
         course_details.self_paced = block.self_paced
         course_details.learning_info = block.learning_info
         course_details.instructor_info = block.instructor_info
+        course_details.duration_value = getattr(block, "duration_value", None)
+        course_details.duration_unit = getattr(block, "duration_unit", "Days")
 
         # Default course license is "All Rights Reserved"
         course_details.license = getattr(block, "license", "all-rights-reserved")
@@ -300,6 +304,18 @@ class CourseDetails:
                 and 'self_paced' in jsondict
                 and jsondict['self_paced'] != block.self_paced):
             block.self_paced = jsondict['self_paced']
+            dirty = True
+
+        if "duration_value" in jsondict and jsondict["duration_value"] != getattr(
+            block, "duration_value", None
+        ):
+            block.duration_value = int(jsondict["duration_value"])
+            dirty = True
+
+        if "duration_unit" in jsondict and jsondict["duration_unit"] != getattr(
+            block, "duration_unit", None
+        ):
+            block.duration_unit = jsondict["duration_unit"]
             dirty = True
 
         if dirty:
