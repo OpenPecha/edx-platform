@@ -31,7 +31,6 @@ from openedx.core.djangoapps.content.course_overviews.models import CourseOvervi
 from openedx.features.course_duration_limits.access import (
     get_user_course_expiration_date,
 )
-from lms.djangoapps.courseware.courses import get_course_about_section
 
 
 class CourseInfoOverviewSerializer(serializers.ModelSerializer):
@@ -49,7 +48,6 @@ class CourseInfoOverviewSerializer(serializers.ModelSerializer):
     course_about = serializers.SerializerMethodField("get_course_about_url")
     course_modes = serializers.SerializerMethodField()
     course_progress = serializers.SerializerMethodField()
-    duration = serializers.SerializerMethodField()
 
     class Meta:
         model = CourseOverview
@@ -68,7 +66,6 @@ class CourseInfoOverviewSerializer(serializers.ModelSerializer):
             'course_about',
             'course_modes',
             'course_progress',
-            'duration',
         )
 
     @staticmethod
@@ -101,52 +98,6 @@ class CourseInfoOverviewSerializer(serializers.ModelSerializer):
 
     def get_org_logo(self, course_overview):
         return get_course_organization_logo(course_overview.id)
-
-    def get_org_logo(self, course_overview):
-        return get_course_organization_logo(course_overview.id)
-
-    def get_duration(self, obj):
-        """
-        Return course duration from about metadata.
-        """
-
-        # Use the request from context or get a request with the user
-        request = self._get_request_with_user()
-
-        try:
-            # Try to get the duration using get_course_about_section
-            return get_course_about_section(request, obj, "duration")
-        except AttributeError:
-            # Handle case where CourseOverview doesn't have static_asset_path
-            # This happens because CourseOverview objects don't have all attributes of full course objects
-            try:
-                # Try to get duration from course details
-                from openedx.core.djangoapps.models.course_details import CourseDetails
-
-                course_details = CourseDetails.fetch(obj.id)
-                return course_details.duration
-            except (ImportError, AttributeError):
-                # If all else fails, return None
-                return None
-
-    def _get_request_with_user(self):
-        """
-        Returns the request from context or creates a minimal request with the user.
-        """
-        request = self.context.get("request")
-        if request is not None:
-            return request
-
-        # If no request but we have a user, create a minimal request
-        user = self.context.get("user")
-        if user is not None:
-            from django.http import HttpRequest
-
-            request = HttpRequest()
-            request.user = user
-            return request
-
-        return None
 
 
 class MobileCourseEnrollmentSerializer(serializers.ModelSerializer):
