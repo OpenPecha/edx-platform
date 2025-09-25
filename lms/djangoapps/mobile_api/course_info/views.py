@@ -353,7 +353,6 @@ class BlocksInfoInCourseView(BlocksInCourseView):
 
                 course_info_context = {
                     'user': requested_user,
-                    'request': request,
                 }
                 user_enrollment = CourseEnrollment.get_enrollment(user=requested_user, course_key=course_key)
                 course_data.update({
@@ -370,9 +369,7 @@ class BlocksInfoInCourseView(BlocksInCourseView):
                     'certificate': get_user_certificate_download_url(request, requested_user, course_key),
                     'enrollment_details': MobileCourseEnrollmentSerializer(user_enrollment).data,
                 })
-
             course_data.update(CourseInfoOverviewSerializer(course_overview, context=course_info_context).data)
-
             response.data.update(course_data)
         return response
 
