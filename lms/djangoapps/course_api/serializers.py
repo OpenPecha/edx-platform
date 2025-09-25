@@ -16,7 +16,7 @@ from openedx.core.djangoapps.content.course_overviews.models import \
     CourseOverview  # lint-amnesty, pylint: disable=unused-import
 from openedx.core.djangoapps.models.course_details import CourseDetails
 from openedx.core.lib.api.fields import AbsoluteURLField
-
+from xmodule.modulestore.django import modulestore
 
 class _MediaSerializer(serializers.Serializer):  # pylint: disable=abstract-method
     """
@@ -150,36 +150,19 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
     def get_duration(self, course_overview):
         """
         Get the course duration from course details.
-        Uses a class-level cache to avoid repeated lookups.
         """
-        # Check if we've already fetched this course's details
-        course_id_str = str(course_overview.id)
-        if course_id_str not in self.__class__._course_details_cache:
-            try:
-                # Fetch and cache the course details
-                self.__class__._course_details_cache[course_id_str] = (
-                    CourseDetails.fetch(course_overview.id)
-                )
-            except (ImportError, AttributeError):
-                self.__class__._course_details_cache[course_id_str] = None
-
-        # Get duration from cached course details
-        course_details = self.__class__._course_details_cache.get(course_id_str)
-
-        if (
-            course_details
-            and getattr(course_details, "duration_value", None)
-            and getattr(course_details, "duration_unit", None)
-        ):
-            value = course_details.duration_value
-            unit = course_details.duration_unit
+        course_details = self._get_course_details(course_overview)
+        duration_value = getattr(course_details, "duration_value", None)
+        duration_unit = getattr(course_details, "duration_unit", None)
+        if course_details and duration_value and duration_unit:
+            value = duration_value
+            unit = duration_unit
 
             # Singularize if needed
             if value == 1 and unit.endswith("s"):
                 unit = unit[:-1]
 
             return f"{value} {unit}"
-
         return None
 
     def _get_course_details(self, course_overview):
@@ -187,7 +170,9 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
         course_id_str = str(course_overview.id)
         if course_id_str not in self.__class__._course_details_cache:
             try:
-                self.__class__._course_details_cache[course_id_str] = CourseDetails.fetch(course_overview.id)
+                self.__class__._course_details_cache[course_id_str] = (
+                    modulestore().get_course(course_overview.id)
+                )
             except (ImportError, AttributeError):
                 self.__class__._course_details_cache[course_id_str] = None
         return self.__class__._course_details_cache.get(course_id_str)
@@ -199,23 +184,23 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
         This maps to the CourseDetails "title" marketing field in Studio,
         which in this deployment is used to capture course requirements.
         """
-        details = self._get_course_details(course_overview)
-        return getattr(details, 'title', None) if details else None
+        course_details = self._get_course_details(course_overview)
+        return getattr(course_details, 'title', None) if course_details else None
 
     def get_description(self, course_overview):
         """
         Return the long description (Studio "description") from CourseDetails.
         Note: This is distinct from the 'overview' field provided on the detail endpoint.
         """
-        details = self._get_course_details(course_overview)
-        return getattr(details, 'description', None) if details else None
+        course_details = self._get_course_details(course_overview)
+        return getattr(course_details, 'description', None) if course_details else None
 
     def get_learning_outcomes(self, course_overview):
         """
         Return learning outcomes as a list of strings from CourseDetails.learning_info.
         """
-        details = self._get_course_details(course_overview)
-        outcomes = getattr(details, 'learning_info', None) if details else None
+        course_details = self._get_course_details(course_overview)
+        outcomes = getattr(course_details, 'learning_info', None) if course_details else None
         # Ensure we only return list[str] or None
         if isinstance(outcomes, (list, tuple)):
             return [o for o in outcomes if isinstance(o, str)]
@@ -226,8 +211,8 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
         Return instructor details excluding media. Each item includes
         name, title, organization, and bio.
         """
-        details = self._get_course_details(course_overview)
-        instructor_info = getattr(details, 'instructor_info', None) if details else None
+        course_details = self._get_course_details(course_overview)
+        instructor_info = getattr(course_details, 'instructor_info', None) if course_details else None
         instructors = []
         try:
             raw_list = (instructor_info or {}).get('instructors', [])
