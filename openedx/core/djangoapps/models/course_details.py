@@ -132,7 +132,7 @@ class CourseDetails:
         course_details.self_paced = block.self_paced
         course_details.learning_info = block.learning_info
         course_details.instructor_info = block.instructor_info
-        course_details.duration_value = getattr(block, "duration_value")
+        course_details.duration_value = getattr(block, "duration_value", None)
         course_details.duration_unit = getattr(block, "duration_unit", "Days")
 
         # Default course license is "All Rights Reserved"
