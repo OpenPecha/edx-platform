@@ -69,6 +69,18 @@ class CourseDetailsSerializer(serializers.Serializer):
     course_image_name = serializers.CharField(allow_blank=True)
     description = serializers.CharField(allow_blank=True)
     duration = serializers.CharField(allow_blank=True)
+    duration_value = serializers.IntegerField(
+        min_value=1, required=False, allow_null=True
+    )
+    duration_unit = serializers.ChoiceField(
+        choices=[
+            ("Days", "Days"),
+            ("Weeks", "Weeks"),
+            ("Months", "Months"),
+            ("Years", "Years"),
+        ],
+        default="Days",
+    )
     effort = serializers.CharField(allow_null=True, allow_blank=True)
     end_date = serializers.DateTimeField(allow_null=True)
     enrollment_end = serializers.DateTimeField(allow_null=True)
