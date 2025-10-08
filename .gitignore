@@ -118,6 +118,8 @@ lms/static/themed_sass/
 cms/static/sass/*.css
 cms/static/sass/*.css.map
 cms/static/themed_sass/
+cms/templates/
+lms/templates/
 themes/**/css
 
 ### Logging artifacts

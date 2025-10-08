@@ -38,6 +38,7 @@ Mode = namedtuple('Mode',
                       'android_sku',
                       'ios_sku',
                       'bulk_sku',
+                      'product_url',
                   ])
 
 
@@ -159,6 +160,18 @@ class CourseMode(models.Model):
         )
     )
 
+    # Optional product URL for linking to external product pages
+    product_url = models.URLField(
+        max_length=500,
+        null=True,
+        blank=True,
+        verbose_name="Product URL",
+        help_text=_(
+            "OPTIONAL: URL to the product page for this course mode. "
+            "This can link to an external payment or registration page."
+        )
+    )
+
     history = HistoricalRecords()
 
     HONOR = 'honor'
@@ -186,6 +199,7 @@ class CourseMode(models.Model):
         settings.COURSE_MODE_DEFAULTS['android_sku'],
         settings.COURSE_MODE_DEFAULTS['ios_sku'],
         settings.COURSE_MODE_DEFAULTS['bulk_sku'],
+        settings.COURSE_MODE_DEFAULTS.get('product_url', None),
     )
     DEFAULT_MODE_SLUG = settings.COURSE_MODE_DEFAULTS['slug']
 
@@ -854,7 +868,8 @@ class CourseMode(models.Model):
             self.sku,
             self.android_sku,
             self.ios_sku,
-            self.bulk_sku
+            self.bulk_sku,
+            self.product_url
         )
 
     def __str__(self):

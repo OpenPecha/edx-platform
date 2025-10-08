@@ -29,6 +29,7 @@ class CourseModeSerializer(serializers.Serializer):
     description = serializers.CharField(required=False)
     sku = serializers.CharField(required=False)
     bulk_sku = serializers.CharField(required=False)
+    product_url = serializers.URLField(required=False)
 
     class Meta:
         # For disambiguating within the drf-yasg swagger schema
