@@ -1,0 +1,483 @@
+<%page expression_filter="h"/>
+<%namespace name='static' file='../static_content.html'/>
+<%!
+from django.utils.translation import gettext as _
+from django.utils.translation import pgettext
+from django.urls import reverse
+from lms.djangoapps.courseware.courses import get_course_about_section
+from django.conf import settings
+from six import text_type
+from common.djangoapps.edxmako.shortcuts import marketing_link
+from openedx.core.djangolib.js_utils import js_escaped_string
+from openedx.core.djangolib.markup import clean_dangerous_html, HTML, Text
+from openedx.core.lib.courses import course_image_url
+from wishlist.models import Wishlist
+from six import string_types
+from openedx.core.djangoapps.models.course_details import CourseDetails
+%>
+
+<%inherit file="../main.html" />
+<%block name="headextra">
+    ## OG (Open Graph) title and description added below to give social media info to display
+    ## (https://developers.facebook.com/docs/opengraph/howtos/maximizing-distribution-media-content#tags)
+    <meta property="og:title" content="${course.display_name_with_default}" />
+    <meta property="og:description" content="${get_course_about_section(request, course, 'short_description') or ''}" />
+    <link rel="stylesheet" type="text/css" href="${static.url('custom_css/course_about.css')}">
+    <link rel="stylesheet" type="text/css" href="${static.url('custom_css/social_sharing.css')}">
+</%block>
+<%block name="js_extra">
+    <script type="text/javascript">
+    (function() {
+        $(".register").click(function(event) {
+            $("#class_enroll_form").submit();
+            event.preventDefault();
+        });
+
+        $('#class_enroll_form').on('ajax:complete', function(event, xhr) {
+            if (xhr.status == 200) {
+                if (xhr.responseText == "") {
+                    location.href = "${reverse('dashboard') | n, js_escaped_string}";
+                }
+                else {
+                    location.href = xhr.responseText;
+                }
+            } else if (xhr.status == 403) {
+                // redirect unauthenticated user to the login page
+                location.replace("${reverse('signin_user') | n, js_escaped_string}?next=" + encodeURIComponent("${request.path | n, js_escaped_string}"));
+            } else {
+                $('#register_error').text(
+                    (xhr.responseText ? xhr.responseText : "${_("An error occurred. Please try again later.") | n, js_escaped_string}")
+                ).css("display", "block");
+            }
+        });
+
+        $(".wishlist-btn").click(function(event) {
+            event.preventDefault();
+            if ($(this).hasClass('add-to-wishlist')) {
+                $("#wishlist_action").val("add");
+            } else if ($(this).hasClass('remove-from-wishlist')) {
+                $("#wishlist_action").val("remove");
+            }
+            $("#wishlist_form").submit();
+        });
+
+        $('#wishlist_form').on('ajax:complete', function(event, xhr) {
+            var action = $("#wishlist_action").val();
+            if (xhr.status == 200) {
+                if (action === "add") {
+                    $(".add-to-wishlist").hide();
+                    $(".remove-from-wishlist").show();
+                } else if (action === "remove") {
+                    $(".remove-from-wishlist").hide();
+                    $(".add-to-wishlist").show();
+                }
+                $('#wishlist_message').text(xhr.responseText).css("display", "block");
+                $('#wishlist_message').addClass('success')
+            } else if (xhr.status == 403) {
+                location.replace("${reverse('signin_user') | n, js_escaped_string}?next=" + encodeURIComponent("${request.path | n, js_escaped_string}"));
+            } else {
+                $('#wishlist_message').text(
+                    (xhr.responseText ? xhr.responseText : "${_("An error occurred. Please try again later.") | n, js_escaped_string}")
+                ).css("display", "block");
+                $('#wishlist_message').addClass('error')
+            }
+        });
+
+    })(this)
+    </script>
+
+    <script src="${static.url('js/course_info.js')}"></script>
+</%block>
+
+<%block name="pagetitle">${course.display_name_with_default}</%block>
+<section class="course-info">
+    <%block name="course_about_header">
+        <%
+            is_wishlisted = Wishlist.is_wishlisted(request.user, course.id)
+        %>
+        <header class="course-profile">
+            <div class="intro-inner-wrapper">
+                <div class="table">
+                    <section class="intro">
+                        <div class="heading-group">
+                            <h1>
+                                ${course.display_name_with_default}
+                            </h1>
+                            <br />
+                            <br/>
+            <p>
+                <strong>${_("Organization: ")}</strong>
+                <span>${course.display_org_with_default}</span>
+            </p>
+                        </div>
+                        <div class="main-cta">
+                            %if user.is_authenticated and registered:
+                                    %if show_courseware_link:
+                                    <a href="${course_target}">
+                                        <strong>${_("View Course")}</strong>
+                                    </a>
+                                %endif
+                            % elif is_course_full:
+                                <span class="register disabled">${_("Course is full")}</span>
+                            % elif invitation_only and not can_enroll:
+                                <span class="register disabled">${_("Enrollment in this course is by invitation only")}</span>
+                                ## Shib courses need the enrollment button to be displayed even when can_enroll is False,
+                                ## because AnonymousUsers cause can_enroll for shib courses to be False, but we need them to be able to click
+                                ## so that they can register and become a real user that can enroll.
+                            % elif not is_shib_course and not can_enroll:
+                                <span class="register disabled">${_("Enrollment is Closed")}</span>
+                            % elif allow_anonymous:
+                                % if show_courseware_link:
+                                    <a href="${course_target}"><strong>${_("View Course")}</strong></a>
+                                % endif
+                            % else:
+                                <%
+                                    if ecommerce_checkout:
+                                        reg_href = ecommerce_checkout_link
+                                    else:
+                                        reg_href = "#"
+
+                                    if single_paid_mode:
+                                        href_class = "add-to-cart"
+                                    else:
+                                        href_class = "register"
+                                %>
+                                % if single_paid_mode and single_paid_mode_product_url:
+                                    <a href="${single_paid_mode_product_url}" class="buy-course-button" style="background-color: #FFAF66 !important; border: none !important; border-top: none !important; box-shadow: none !important; color: #FFFFFF !important;">
+                                        ${_("Buy Course")}
+                                    </a>
+                                % else:
+                                    <a href="${reg_href}" class="${href_class}">
+                                        ${_("Enroll Now")}
+                                    </a>
+                                % endif
+                                <div id="register_error"></div>
+                            %endif
+                            % if is_wishlisted:
+                                <a href="#" class="remove-from-wishlist wishlist-btn">${_("Remove from Wishlist")}</a>
+                                <a href="#" class="add-to-wishlist wishlist-btn" style="display: none;">${_("Add to Wishlist")}</a>
+                            % else:
+                                <a href="#" class="remove-from-wishlist wishlist-btn" style="display: none;">${_("Remove from Wishlist")}</a>
+                                <a href="#" class="add-to-wishlist wishlist-btn">${_("Add to Wishlist")}</a>
+                            % endif
+                            <div id="wishlist_message"></div>
+                        </div>
+                    </section>
+                    % if get_course_about_section(request, course, "video"):
+                        <a href="#video-modal" class="media" rel="leanModal">
+                            <div class="hero">
+                                <img src="${course_image_urls['large']}" alt="" />
+                                <div class="play-intro"></div>
+                            </div>
+                        </a>
+                    % else:
+                        <div class="media">
+                            <div class="hero">
+                                <img src="${course_image_urls['large']}" alt="" />
+                            </div>
+                        </div>
+                    % endif
+                </div>
+            </div>
+        </header>
+    </%block>
+    <div class="container">
+        <%block name="course_about_details">
+            <div class="details">
+                <div class="inner-wrapper">
+                    % if get_course_about_section(request, course, "short_description"):
+                        <% short_desc = get_course_about_section(request, course, "short_description").strip() %>
+                        % if short_desc:
+                        <div class="course-short-description">
+                            <h2><strong>${_("About this Course")}</strong></h2>
+                            <p>${clean_dangerous_html(short_desc) | n, decode.utf8}</p>
+                        </div>
+                        % endif
+                    % endif
+
+                    <% 
+                        description = get_course_about_section(request, course, "description") 
+                        has_description = description and description.strip()
+                    %>
+                    % if description:
+                        % if has_description:
+                            <div class="course-description">
+                                <h2><strong>${_("Course Description")}</strong></h2>
+                                <div class="course-description-body">
+                                    ${clean_dangerous_html(description)}
+                                </div>
+                            </div>
+                        % endif
+                    % endif
+
+                    <%
+                        overview = get_course_about_section(request, course, "overview")
+                        has_overview = overview and overview.strip()
+                    %>
+                    % if has_overview:
+                        <div class="course-overview">
+                            <h2><strong>${_("Course Overview")}</strong></h2>
+                            <p>${clean_dangerous_html(overview)}</p>
+                        </div>
+                    % endif
+                </div>
+                <% 
+                    # Marketing Course Title (from extended course details). Use in main info as Requirements.
+                    marketing_title = CourseDetails.fetch_about_attribute(course.id, 'title')
+                    has_marketing_title = marketing_title and str(marketing_title).strip()
+                %>
+                % if has_marketing_title:
+                    <div class="course-requirements">
+                        <div class="inner-wrapper">
+                            <h2><strong>${_("Course Requirements")}</strong></h2>
+                            <p class="requirements-text">${clean_dangerous_html(marketing_title)}</p>
+                        </div>
+                    </div>
+                % endif
+                
+                <%
+                    learning_outcomes = getattr(course, 'learning_info', []) or []
+                %>
+                <% 
+                    has_outcomes = learning_outcomes and any(outcome.strip() for outcome in learning_outcomes if outcome) 
+                %>
+                % if has_outcomes:
+                    <div class="learning-outcomes">
+                        <h2><strong>${_("Learning Outcomes")}</strong></h2>
+                        <ul class="learning-outcomes-list">
+                            % for outcome in learning_outcomes:
+                                % if outcome and outcome.strip():
+                                    <li class="learning-outcome-item">${clean_dangerous_html(outcome)}</li>
+                                % endif
+                            % endfor
+                        </ul>
+                    </div>
+                % endif
+                <%
+                    info = getattr(course, 'instructor_info', None)
+                    instructors = []
+                    if isinstance(info, dict) and info.get('instructors'):
+                        instructors = info.get('instructors') or []
+                    elif isinstance(info, (list, tuple)):
+                        instructors = info
+                    elif isinstance(info, string_types):
+                        instructors = [info]
+                %>
+                <% has_instructors = instructors and any(inst for inst in instructors if inst) %>
+                % if has_instructors:
+                    <div class="instructors">
+                        <h2><strong>${_("Instructors")}</strong></h2>
+                        <ul class="instructor-list">
+                            % for inst in instructors:
+                                <%
+                                    # Coerce to dict for uniform access
+                                    if isinstance(inst, string_types):
+                                        inst_dict = {'name': inst}
+                                    elif hasattr(inst, 'get'):
+                                        inst_dict = inst
+                                    else:
+                                        inst_dict = {}
+                                %>
+                                <li class="instructor">
+                                    % if inst_dict.get('image'):
+                                        <div class="instructor-image">
+                                            <img src="${inst_dict.get('image')}" alt="${inst_dict.get('name') or _('Instructor image')}" />
+                                        </div>
+                                    % endif
+                                    <div class="instructor-meta">
+                                        % if inst_dict.get('name'):
+                                            <p class="instructor-name"><strong>${inst_dict.get('name')}</strong></p>
+                                        % endif
+                                        % if inst_dict.get('title') or inst_dict.get('organization'):
+                                            <p class="instructor-title-org">
+                                                % if inst_dict.get('title'):
+                                                    <span class="instructor-title">${inst_dict.get('title')}</span>
+                                                % endif
+                                                % if inst_dict.get('title') and inst_dict.get('organization'):
+                                                    <span> · </span>
+                                                % endif
+                                                % if inst_dict.get('organization'):
+                                                    <span class="instructor-org">${inst_dict.get('organization')}</span>
+                                                % endif
+                                            </p>
+                                        % endif
+                                    </div>
+                                    % if inst_dict.get('bio'):
+                                        <div class="instructor-bio">
+                                            ${clean_dangerous_html(inst_dict.get('bio'))}
+                                        </div>
+                                    % endif
+                                </li>
+                            % endfor
+                        </ul>
+                    </div>
+                % endif
+            </div>
+        </%block>
+        <div class="course-sidebar">
+            <div class="course-summary">
+                <%include file="course_about_sidebar_header.html" />
+                <%block name="course_about_important_dates">
+                    <ol class="important-dates">
+                        <li class="important-dates-item">
+                            <span class="icon fa fa-info-circle" aria-hidden="true"></span><p class="important-dates-item-title">${_("Course Number")}</p><span class="important-dates-item-text course-number">${course.display_number_with_default}</span>
+                        </li>
+                        % if not course.start_date_is_still_default:
+                            <%
+                                course_start_date = course.advertised_start or course.start
+                            %>
+                            <li class="important-dates-item">
+                                <span class="icon fa fa-calendar" aria-hidden="true"></span>
+                                <p class="important-dates-item-title">${_("Classes Start")}</p>
+                                % if isinstance(course_start_date, string_types):
+                                    <span class="important-dates-item-text start-date">${course_start_date}</span>
+                                % else:
+                                    <%
+                                        course_date_string = course_start_date.strftime('%Y-%m-%dT%H:%M:%S%z')
+                                    %>
+                                    <span class="important-dates-item-text start-date localized_datetime" data-format="shortDate" data-datetime="${course_date_string}" data-language="${LANGUAGE_CODE}"></span>
+                                % endif
+                            </li>
+                        % endif
+                        ## We plan to ditch end_date (which is not stored in course metadata),
+                        ## but for backwards compatibility, show about/end_date blob if it exists.
+                        % if course.end:
+                            <%
+                                course_end_date = course.end
+                            %>
+                            <li class="important-dates-item">
+                                <span class="icon fa fa-calendar" aria-hidden="true"></span>
+                                <p class="important-dates-item-title">${_("Classes End")}</p>
+                                % if isinstance(course_end_date, string_types):
+                                    <span class="important-dates-item-text final-date">${course_end_date}</span>
+                                % else:
+                                    <%
+                                        course_date_string = course_end_date.strftime('%Y-%m-%dT%H:%M:%S%z')
+                                    %>
+                                    <span class="important-dates-item-text final-date localized_datetime" data-format="shortDate" data-datetime="${course_date_string}" data-language="${LANGUAGE_CODE}"></span>
+                                % endif
+                            </li>
+                        % endif
+                                <% 
+                            effort = get_course_about_section(request, course, "effort")
+                            has_effort = effort and effort.strip()
+                        %>
+                        % if has_effort:
+                            <li class="important-dates-item">
+                                <span class="icon fa fa-pencil" aria-hidden="true"></span>
+                                <p class="important-dates-item-title">${_("Estimated Effort")}</p>
+                                <span class="important-dates-item-text effort">${effort}</span>
+                            </li>
+                        % endif
+
+                        % if get_course_about_section(request, course, "duration"):
+                            <li class="important-dates-item">
+                                <span class="icon fa fa-clock-o" aria-hidden="true"></span>
+                                <p class="important-dates-item-title">${_('Course Duration')}</p>
+                                <span class="important-dates-item-text course-length">${get_course_about_section(request, course, "duration")}</span>
+                            </li>
+                        % endif
+
+                        % if course_mode_price_display:
+                            <li class="important-dates-item">
+                                <span class="icon fa fa-money" aria-hidden="true"></span>
+                                <p class="important-dates-item-title">${_("Price")}</p>
+                                <span class="important-dates-item-text">${course_mode_price_display}</span>
+                            </li>
+                        % elif course_price and (is_cosmetic_price_enabled):
+                            <li class="important-dates-item">
+                                <span class="icon fa fa-money" aria-hidden="true"></span>
+                                <p class="important-dates-item-title">${_("Price")}</p>
+                                <span class="important-dates-item-text">${course_price}</span>
+                            </li>
+                        % endif
+                        % if pre_requisite_courses:
+                            <% prc_target = reverse('about_course', args=[text_type(pre_requisite_courses[0]['key'])]) %>
+                            <li class="prerequisite-course important-dates-item">
+                                <span class="icon fa fa-list-ul" aria-hidden="true"></span>
+                                <p class="important-dates-item-title">${_("Prerequisites")}</p>
+                                ## Multiple pre-requisite courses are not supported on frontend that's why we are pulling first element
+                                <span class="important-dates-item-text pre-requisite"><a href="${prc_target}">${pre_requisite_courses[0]['display']}</a></span>
+                                <p class="tip">
+                                    ${Text(_("You must successfully complete {link_start}{prc_display}{link_end} before you begin this course.")).format(
+                                    link_start=HTML('<a href="{}">').format(prc_target),
+                                    link_end=HTML('</a>'),
+                                    prc_display=pre_requisite_courses[0]['display'],
+                                    )}
+                                </p>
+                            </li>
+                        % endif
+                        <% 
+                            prerequisites = get_course_about_section(request, course, "prerequisites")
+                            has_prerequisites = prerequisites and prerequisites.strip()
+                        %>
+                        % if has_prerequisites:
+                            <li class="important-dates-item">
+                                <span class="icon fa fa-book" aria-hidden="true"></span>
+                                <p class="important-dates-item-title">${_("Requirements")}</p>
+                                <span class="important-dates-item-text prerequisites">${prerequisites}</span>
+                            </li>
+                        % endif
+                    </ol>
+                </%block>
+            </div>
+            ## For now, ocw links are the only thing that goes in additional resources
+            % if get_course_about_section(request, course, "ocw_links"):
+                <div class="additional-resources">
+                    <h1>${_("Additional Resources")}</h1>
+                </div>
+                <div>
+                    ## "MITOpenCourseware" should *not* be translated
+                    <h2 class="opencourseware">MITOpenCourseware</h2>
+                    ${get_course_about_section(request, course, "ocw_links")}
+                </div>
+            % endif
+            % if staff_access and studio_url is not None:
+                <div class="wrap-instructor-info studio-view" style="margin-top: 20px;">
+                    <a class="instructor-info-action" href="${studio_url}">${_("View About Page in Studio")}</a>
+                </div>
+            % endif
+        </div>
+        % if sidebar_html_enabled:
+            % if get_course_about_section(request, course, "about_sidebar_html"):
+                <section class="about-sidebar-html">
+                    ${get_course_about_section(request, course, "about_sidebar_html")}
+                </section>
+            % endif
+        % endif
+    </div>
+</section>
+## Need to put this hidden form on the page so that the registration button works.
+## Since it's no harm to display a hidden form, we display it with the most permissive conditional
+## which is when the student is not registered.
+% if active_reg_button or is_shib_course:
+    <div style="display: none;">
+        <form id="class_enroll_form" method="post" data-remote="true" action="${reverse('change_enrollment')}">
+            <fieldset class="enroll_fieldset">
+                <legend class="sr">${pgettext("self","Enroll")}</legend>
+                <input name="course_id" type="hidden" value="${course.id}">
+                <input name="enrollment_action" type="hidden" value="enroll">
+            </fieldset>
+            <div class="submit">
+                <input name="submit" type="submit" value="${pgettext('self','enroll')}">
+            </div>
+        </form>
+    </div>
+% endif
+<div style="display: none;">
+    <form id="wishlist_form" method="post" data-remote="true" action="${reverse('wishlist:change-wishlist-status')}">
+        <fieldset class="enroll_fieldset">
+            <input name="course_id" type="hidden" value="${course.id}">
+            <input name="wishlist_action" id="wishlist_action" type="hidden" value="">
+        </fieldset>
+        <div class="submit">
+            <input name="submit" type="submit">
+        </div>
+    </form>
+</div>
+
+<%include file="../video_modal.html" />
+
+<%static:require_module_async module_name="js/dateutil_factory" class_name="DateUtilFactory">
+    DateUtilFactory.transform(iterationKey=".localized_datetime");
+</%static:require_module_async>
