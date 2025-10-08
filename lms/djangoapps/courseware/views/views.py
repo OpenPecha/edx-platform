@@ -824,12 +824,34 @@ def course_about(request, course_id):  # pylint: disable=too-many-statements
         ecommerce_checkout_link = ''
         ecommerce_bulk_checkout_link = ''
         single_paid_mode = None
+        single_paid_mode_product_url = ''
+        course_mode_price_display = ''
         if ecommerce_checkout:
             if len(modes) == 1 and list(modes.values())[0].min_price:
                 single_paid_mode = list(modes.values())[0]
             else:
                 # have professional ignore other modes for historical reasons
                 single_paid_mode = modes.get(CourseMode.PROFESSIONAL)
+
+            if single_paid_mode:
+                single_paid_mode_product_url = getattr(single_paid_mode, 'product_url', '') or ''
+
+            mode_for_price = None
+            if single_paid_mode:
+                mode_for_price = single_paid_mode
+            else:
+                # fall back to first mode with a defined price
+                for mode in modes.values():
+                    if mode.min_price:
+                        mode_for_price = mode
+                        break
+
+            if mode_for_price and mode_for_price.min_price:
+                currency_code = (mode_for_price.currency or '').upper()
+                if currency_code:
+                    course_mode_price_display = f"{mode_for_price.min_price} {currency_code}"
+                else:
+                    course_mode_price_display = str(mode_for_price.min_price)
 
             if single_paid_mode and single_paid_mode.sku:
                 ecommerce_checkout_link = ecomm_service.get_checkout_page_url(
@@ -874,10 +896,12 @@ def course_about(request, course_id):  # pylint: disable=too-many-statements
             'course_target': course_target,
             'is_cosmetic_price_enabled': settings.FEATURES.get('ENABLE_COSMETIC_DISPLAY_PRICE'),
             'course_price': course_price,
+            'course_mode_price_display': course_mode_price_display,
             'ecommerce_checkout': ecommerce_checkout,
             'ecommerce_checkout_link': ecommerce_checkout_link,
             'ecommerce_bulk_checkout_link': ecommerce_bulk_checkout_link,
             'single_paid_mode': single_paid_mode,
+            'single_paid_mode_product_url': single_paid_mode_product_url,
             'show_courseware_link': show_courseware_link,
             'is_course_full': is_course_full,
             'can_enroll': can_enroll,
