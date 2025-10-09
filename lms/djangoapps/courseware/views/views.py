@@ -837,6 +837,9 @@ def course_about(request, course_id):  # pylint: disable=too-many-statements
 
             if single_paid_mode:
                 single_paid_mode_product_url = getattr(single_paid_mode, 'product_url', '') or ''
+                # Fallback to configured URL if product_url is not set
+                if not single_paid_mode_product_url:
+                    single_paid_mode_product_url = settings.FEATURES.get('COURSE_PRODUCT_FALLBACK_URL', '')
 
             mode_for_price = None
             if single_paid_mode:
