@@ -132,7 +132,7 @@ User = get_user_model()
 
 __all__ = ['course_info_handler', 'course_handler', 'course_listing',
            'course_info_update_handler', 'course_search_index_handler',
-           'course_rerun_handler',
+           'course_rerun_handler', 'course_modes_handler',
            'settings_handler',
            'library_listing',
            'grading_handler',
@@ -1924,3 +1924,188 @@ def get_organizations(user):
         organizations = course_creator.organizations.all().values_list('short_name', flat=True)
 
     return organizations
+
+
+@login_required
+@ensure_csrf_cookie
+@require_http_methods(("GET", "POST", "PUT", "DELETE"))
+@expect_json
+def course_modes_handler(request, course_key_string):
+    """
+    Course modes management handler for course staff/instructors.
+    
+    GET: Display the course modes management page
+    POST: Create a new course mode
+    PUT: Update an existing course mode
+    DELETE: Delete a course mode
+    """
+    from common.djangoapps.course_modes.models import CourseMode
+    from common.djangoapps.course_modes.rest_api.serializers import CourseModeSerializer
+    from django.http import Http404
+    
+    course_key = CourseKey.from_string(course_key_string)
+    
+    # Check permissions - allow course staff, instructors, and course creators
+    if not has_studio_write_access(request.user, course_key):
+        raise PermissionDenied()
+    
+    with modulestore().bulk_operations(course_key):
+        course_block = get_course_and_check_access(course_key, request.user)
+        
+        # Handle HTML GET request for the page
+        if 'text/html' in request.META.get('HTTP_ACCEPT', '') and request.method == 'GET':
+            # Get all course modes for this course
+            course_modes = CourseMode.modes_for_course_dict(course_key, include_expired=True)
+            
+            context = {
+                'context_course': course_block,
+                'course_key': course_key,
+                'course_modes': course_modes,
+                'currency_symbols': {
+                    'usd': '$', 'eur': '€', 'gbp': '£', 'cad': 'C$', 
+                    'aud': 'A$', 'inr': '₹', 'cny': '¥', 'jpy': '¥'
+                },
+                'available_modes': CourseMode.ALL_MODES,
+                'lms_link': get_lms_link_for_item(course_block.location),
+                'course_handler_url': reverse('course_handler', kwargs={'course_key_string': str(course_key)})
+            }
+            
+            return render_to_response('course_modes.html', context)
+        
+        # Handle JSON API requests
+        elif 'application/json' in request.META.get('HTTP_ACCEPT', ''):
+            if request.method == 'GET':
+                # Get all course modes for this course
+                modes = CourseMode.objects.filter(course_id=course_key)
+                serializer = CourseModeSerializer(modes, many=True)
+                return JsonResponse({'modes': serializer.data})
+            
+            elif request.method == 'POST':
+                # Create a new course mode
+                mode_data = request.json
+                log.info(f"POST request data: {mode_data}")
+                
+                try:
+                    # Check if mode already exists
+                    mode_slug = mode_data.get('mode_slug')
+                    if not mode_slug:
+                        log.error("No mode_slug provided in POST request")
+                        return JsonResponseBadRequest({'error': 'mode_slug is required'})
+                    
+                    existing_mode = CourseMode.objects.filter(
+                        course_id=course_key,
+                        mode_slug=mode_slug
+                    ).first()
+                    
+                    if existing_mode:
+                        log.error(f"Mode already exists: {mode_slug}")
+                        return JsonResponseBadRequest({
+                            'error': f"Mode '{mode_slug}' already exists for this course"
+                        })
+                    
+                    # Get the course overview for the foreign key
+                    from openedx.core.djangoapps.content.course_overviews.models import CourseOverview
+                    course_overview = CourseOverview.get_from_id(course_key)
+                    
+                    # Create the mode directly
+                    new_mode = CourseMode(
+                        course=course_overview,
+                        mode_slug=mode_slug,
+                        mode_display_name=mode_data.get('mode_display_name', ''),
+                        min_price=mode_data.get('min_price', 0),
+                        currency=mode_data.get('currency', 'usd'),
+                        description=mode_data.get('description', ''),
+                        sku=mode_data.get('sku', ''),
+                        bulk_sku=mode_data.get('bulk_sku', ''),
+                        product_url=mode_data.get('product_url', '')
+                    )
+                    
+                    if 'expiration_datetime' in mode_data:
+                        new_mode._expiration_datetime = mode_data['expiration_datetime']
+                    
+                    new_mode.save()
+                    log.info(f"Successfully created mode: {mode_slug}")
+                    
+                    return JsonResponse({
+                        'success': True,
+                        'mode': {
+                            'mode_slug': new_mode.mode_slug,
+                            'mode_display_name': new_mode.mode_display_name,
+                            'min_price': new_mode.min_price,
+                            'currency': new_mode.currency
+                        }
+                    })
+                except Exception as e:
+                    log.error(f"Error creating course mode: {str(e)}", exc_info=True)
+                    return JsonResponseBadRequest({'error': str(e)})
+            
+            elif request.method == 'PUT':
+                # Update an existing course mode
+                mode_data = request.json
+                log.info(f"PUT request data: {mode_data}")
+                mode_slug = mode_data.get('mode_slug')
+                
+                if not mode_slug:
+                    log.error("No mode_slug provided in PUT request")
+                    return JsonResponseBadRequest({'error': 'mode_slug is required'})
+                
+                try:
+                    mode = CourseMode.objects.get(course_id=course_key, mode_slug=mode_slug)
+                    log.info(f"Found existing mode: {mode_slug}")
+                    
+                    # Don't send unchangeable fields to serializer
+                    update_data = {k: v for k, v in mode_data.items() if k not in ['course_id', 'mode_slug']}
+                    log.info(f"Update data (after filtering): {update_data}")
+                    
+                    # Directly update the model fields
+                    if 'mode_display_name' in update_data:
+                        mode.mode_display_name = update_data['mode_display_name']
+                    if 'min_price' in update_data:
+                        mode.min_price = update_data['min_price']
+                    if 'currency' in update_data:
+                        mode.currency = update_data['currency']
+                    if 'description' in update_data:
+                        mode.description = update_data['description']
+                    if 'sku' in update_data:
+                        mode.sku = update_data['sku']
+                    if 'bulk_sku' in update_data:
+                        mode.bulk_sku = update_data['bulk_sku']
+                    if 'product_url' in update_data:
+                        mode.product_url = update_data['product_url']
+                    if 'expiration_datetime' in update_data:
+                        mode._expiration_datetime = update_data['expiration_datetime']
+                    
+                    mode.save()
+                    log.info(f"Successfully updated mode: {mode_slug}")
+                    
+                    return JsonResponse({
+                        'success': True,
+                        'mode': {
+                            'mode_slug': mode.mode_slug,
+                            'mode_display_name': mode.mode_display_name,
+                            'min_price': mode.min_price,
+                            'currency': mode.currency
+                        }
+                    })
+                except CourseMode.DoesNotExist:
+                    log.error(f"CourseMode not found: {mode_slug}")
+                    return JsonResponseBadRequest({'error': f"Mode '{mode_slug}' not found"})
+                except Exception as e:
+                    log.error(f"Error updating course mode: {str(e)}", exc_info=True)
+                    return JsonResponseBadRequest({'error': str(e)})
+            
+            elif request.method == 'DELETE':
+                # Delete a course mode
+                mode_slug = request.json.get('mode_slug')
+                
+                if not mode_slug:
+                    return JsonResponseBadRequest({'error': 'mode_slug is required'})
+                
+                try:
+                    mode = CourseMode.objects.get(course_id=course_key, mode_slug=mode_slug)
+                    mode.delete()
+                    return JsonResponse({'success': True})
+                except CourseMode.DoesNotExist:
+                    return JsonResponseBadRequest({'error': f"Mode '{mode_slug}' not found"})
+        
+        return JsonResponseBadRequest({'error': 'Invalid request'})
