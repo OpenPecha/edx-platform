@@ -146,6 +146,8 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
 
     # Cache for course details to avoid repeated lookups
     _course_details_cache = {}
+    # Cache for about attributes to avoid repeated modulestore queries
+    _about_attributes_cache = {}
 
     def get_duration(self, course_overview):
         """
@@ -177,6 +179,16 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
                 self.__class__._course_details_cache[course_id_str] = None
         return self.__class__._course_details_cache.get(course_id_str)
 
+    def _get_about_attribute(self, course_overview, attribute):
+        """Helper to get cached about attributes for a course_overview."""
+        course_id_str = str(course_overview.id)
+        cache_key = f"{course_id_str}:{attribute}"
+        if cache_key not in self.__class__._about_attributes_cache:
+            self.__class__._about_attributes_cache[cache_key] = (
+                CourseDetails.fetch_about_attribute(course_overview.id, attribute)
+            )
+        return self.__class__._about_attributes_cache.get(cache_key)
+
     def get_course_requirement(self, course_overview):
         """
         Return the course requirement value configured in Studio.
@@ -184,16 +196,15 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
         This maps to the CourseDetails "title" marketing field in Studio,
         which in this deployment is used to capture course requirements.
         """
-        course_details = self._get_course_details(course_overview)
-        return getattr(course_details, 'title', None) if course_details else None
+        # Studio stores this value in the "title" about attribute; we expose it as Course Requirement.
+        return self._get_about_attribute(course_overview, 'title')
 
     def get_description(self, course_overview):
         """
         Return the long description (Studio "description") from CourseDetails.
         Note: This is distinct from the 'overview' field provided on the detail endpoint.
         """
-        course_details = self._get_course_details(course_overview)
-        return getattr(course_details, 'description', None) if course_details else None
+        return self._get_about_attribute(course_overview, 'description')
 
     def get_learning_outcomes(self, course_overview):
         """
@@ -251,7 +262,7 @@ class CourseDetailSerializer(CourseSerializer):  # pylint: disable=abstract-meth
         # Note: This makes a call to the modulestore, unlike the other
         # fields from CourseSerializer, which get their data
         # from the CourseOverview object in SQL.
-        return CourseDetails.fetch_about_attribute(course_overview.id, 'overview')
+        return self._get_about_attribute(course_overview, 'overview')
 
     def to_representation(self, instance):
         """
