@@ -144,16 +144,11 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
         ])
         return self.context['request'].build_absolute_uri(base_url)
 
-    # Cache for course details to avoid repeated lookups
-    _course_details_cache = {}
-    # Cache for about attributes to avoid repeated modulestore queries
-    _about_attributes_cache = {}
-
     def get_duration(self, course_overview):
         """
         Get the course duration from course details.
         """
-        course_details = self._get_course_details(course_overview)
+        course_details = self._get_cached_course_details(course_overview)
         duration_value = getattr(course_details, "duration_value", None)
         duration_unit = getattr(course_details, "duration_unit", None)
         if course_details and duration_value and duration_unit:
@@ -167,27 +162,58 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
             return f"{value} {unit}"
         return None
 
-    def _get_course_details(self, course_overview):
-        """Helper to get cached CourseDetails for a course_overview."""
+    def _get_cached_course_details(self, course_overview):
+        """
+        Get course details with instance-level caching.
+        Uses instance attribute to cache for the lifetime of this serializer instance.
+        """
+        cache_key = '_course_details_instance_cache'
+        cache = getattr(self, cache_key, None)
+        if cache is None:
+            cache = {}
+            setattr(self, cache_key, cache)
+
         course_id_str = str(course_overview.id)
-        if course_id_str not in self.__class__._course_details_cache:
+        if course_id_str not in cache:
             try:
-                self.__class__._course_details_cache[course_id_str] = (
-                    modulestore().get_course(course_overview.id)
-                )
+                cache[course_id_str] = modulestore().get_course(course_overview.id)
             except (ImportError, AttributeError):
-                self.__class__._course_details_cache[course_id_str] = None
-        return self.__class__._course_details_cache.get(course_id_str)
+                cache[course_id_str] = None
+
+        return cache[course_id_str]
+
+    def _get_cached_about_attributes(self, course_overview, attributes):
+        """
+        Batch fetch multiple about attributes with instance-level caching.
+
+        Args:
+            course_overview: CourseOverview instance
+            attributes: list of attribute names to fetch
+            
+        Returns:
+            dict mapping attribute names to their values
+        """
+        cache_key = '_about_attributes_instance_cache'
+        cache = getattr(self, cache_key, None)
+        if cache is None:
+            cache = {}
+            setattr(self, cache_key, cache)
+
+        course_id_str = str(course_overview.id)
+        course_cache = cache.setdefault(course_id_str, {})
+        result = {}
+
+        # Fetch any attributes not yet cached for this course
+        for attr in attributes:
+            if attr not in course_cache:
+                course_cache[attr] = CourseDetails.fetch_about_attribute(course_overview.id, attr)
+            result[attr] = course_cache[attr]
+
+        return result
 
     def _get_about_attribute(self, course_overview, attribute):
-        """Helper to get cached about attributes for a course_overview."""
-        course_id_str = str(course_overview.id)
-        cache_key = f"{course_id_str}:{attribute}"
-        if cache_key not in self.__class__._about_attributes_cache:
-            self.__class__._about_attributes_cache[cache_key] = (
-                CourseDetails.fetch_about_attribute(course_overview.id, attribute)
-            )
-        return self.__class__._about_attributes_cache.get(cache_key)
+        """Helper to get a single about attribute using the batch cache."""
+        return self._get_cached_about_attributes(course_overview, [attribute])[attribute]
 
     def get_course_requirement(self, course_overview):
         """
@@ -210,7 +236,7 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
         """
         Return learning outcomes as a list of strings from CourseDetails.learning_info.
         """
-        course_details = self._get_course_details(course_overview)
+        course_details = self._get_cached_course_details(course_overview)
         outcomes = getattr(course_details, 'learning_info', None) if course_details else None
         # Ensure we only return list[str] or None
         if isinstance(outcomes, (list, tuple)):
@@ -222,7 +248,7 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
         Return instructor details excluding media. Each item includes
         name, title, organization, and bio.
         """
-        course_details = self._get_course_details(course_overview)
+        course_details = self._get_cached_course_details(course_overview)
         instructor_info = getattr(course_details, 'instructor_info', None) if course_details else None
         instructors = []
         try:
