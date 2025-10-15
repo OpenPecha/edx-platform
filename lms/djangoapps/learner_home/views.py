@@ -569,7 +569,6 @@ class InitializeView(APIView):  # pylint: disable=unused-argument
             "unfulfilled_entitlement_pseudo_sessions": unfulfilled_entitlement_pseudo_sessions,
             "pseudo_session_course_overviews": pseudo_session_course_overviews,
             "programs": programs,
-            "user": user,
         }
 
         response_data = serialize_learner_home_data(learner_dash_data, context)
