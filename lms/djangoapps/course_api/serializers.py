@@ -251,6 +251,10 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
         course_details = self._get_cached_course_details(course_overview)
         instructor_info = getattr(course_details, 'instructor_info', None) if course_details else None
         instructors = []
+        request = self.context.get('request') if self.context else None
+        absolute_url_field = AbsoluteURLField() if request else None
+        if absolute_url_field:
+            absolute_url_field._context = {'request': request}  # lint-amnesty, pylint: disable=protected-access
         try:
             raw_list = (instructor_info or {}).get('instructors', [])
         except AttributeError:
@@ -258,11 +262,16 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
         for ins in raw_list:
             if not isinstance(ins, dict):
                 continue
+            image_url = ins.get('image')
+            if image_url:
+                if absolute_url_field:
+                    image_url = absolute_url_field.to_representation(image_url)
             instructors.append({
                 'name': ins.get('name'),
                 'title': ins.get('title'),
                 'organization': ins.get('organization'),
                 'bio': ins.get('bio'),
+                'image': image_url,
             })
         return instructors or None
 
