@@ -118,10 +118,6 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
     invitation_only = serializers.BooleanField()
     # fields enabled by the extended course detail flag
     duration = serializers.SerializerMethodField()
-    course_requirement = serializers.SerializerMethodField()
-    description = serializers.SerializerMethodField()
-    learning_outcomes = serializers.SerializerMethodField()
-    instructors = serializers.SerializerMethodField()
 
     # 'course_id' is a deprecated field, please use 'id' instead.
     course_id = serializers.CharField(source='id', read_only=True)
@@ -181,6 +177,34 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
                 cache[course_id_str] = None
 
         return cache[course_id_str]
+
+
+class CourseDetailSerializer(CourseSerializer):  # pylint: disable=abstract-method
+    """
+    Serializer for Course objects providing additional details about the
+    course.
+
+    This serializer makes additional database accesses (to the modulestore) and
+    returns more data (including 'overview' text). Therefore, for performance
+    and bandwidth reasons, it is expected that this serializer is used only
+    when serializing a single course, and not for serializing a list of
+    courses.
+    """
+    # fields enabled by the extended course detail flag
+    overview = serializers.SerializerMethodField()
+    course_requirement = serializers.SerializerMethodField()
+    description = serializers.SerializerMethodField()
+    learning_outcomes = serializers.SerializerMethodField()
+    instructors = serializers.SerializerMethodField()
+
+    def get_overview(self, course_overview):
+        """
+        Get the representation for SerializerMethodField `overview`
+        """
+        # Note: This makes a call to the modulestore, unlike the other
+        # fields from CourseSerializer, which get their data
+        # from the CourseOverview object in SQL.
+        return self._get_about_attribute(course_overview, "overview")
 
     def _get_cached_about_attributes(self, course_overview, attributes):
         """
@@ -274,30 +298,6 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
                 'image': image_url,
             })
         return instructors or None
-
-
-class CourseDetailSerializer(CourseSerializer):  # pylint: disable=abstract-method
-    """
-    Serializer for Course objects providing additional details about the
-    course.
-
-    This serializer makes additional database accesses (to the modulestore) and
-    returns more data (including 'overview' text). Therefore, for performance
-    and bandwidth reasons, it is expected that this serializer is used only
-    when serializing a single course, and not for serializing a list of
-    courses.
-    """
-
-    overview = serializers.SerializerMethodField()
-
-    def get_overview(self, course_overview):
-        """
-        Get the representation for SerializerMethodField `overview`
-        """
-        # Note: This makes a call to the modulestore, unlike the other
-        # fields from CourseSerializer, which get their data
-        # from the CourseOverview object in SQL.
-        return self._get_about_attribute(course_overview, 'overview')
 
     def to_representation(self, instance):
         """
