@@ -118,10 +118,6 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
     invitation_only = serializers.BooleanField()
     # fields enabled by the extended course detail flag
     duration = serializers.SerializerMethodField()
-    course_requirement = serializers.SerializerMethodField()
-    description = serializers.SerializerMethodField()
-    learning_outcomes = serializers.SerializerMethodField()
-    instructors = serializers.SerializerMethodField()
 
     # 'course_id' is a deprecated field, please use 'id' instead.
     course_id = serializers.CharField(source='id', read_only=True)
@@ -144,14 +140,11 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
         ])
         return self.context['request'].build_absolute_uri(base_url)
 
-    # Cache for course details to avoid repeated lookups
-    _course_details_cache = {}
-
     def get_duration(self, course_overview):
         """
         Get the course duration from course details.
         """
-        course_details = self._get_course_details(course_overview)
+        course_details = self._get_cached_course_details(course_overview)
         duration_value = getattr(course_details, "duration_value", None)
         duration_unit = getattr(course_details, "duration_unit", None)
         if course_details and duration_value and duration_unit:
@@ -165,69 +158,25 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
             return f"{value} {unit}"
         return None
 
-    def _get_course_details(self, course_overview):
-        """Helper to get cached CourseDetails for a course_overview."""
+    def _get_cached_course_details(self, course_overview):
+        """
+        Get course details with instance-level caching.
+        Uses instance attribute to cache for the lifetime of this serializer instance.
+        """
+        cache_key = '_course_details_instance_cache'
+        cache = getattr(self, cache_key, None)
+        if cache is None:
+            cache = {}
+            setattr(self, cache_key, cache)
+
         course_id_str = str(course_overview.id)
-        if course_id_str not in self.__class__._course_details_cache:
+        if course_id_str not in cache:
             try:
-                self.__class__._course_details_cache[course_id_str] = (
-                    modulestore().get_course(course_overview.id)
-                )
+                cache[course_id_str] = modulestore().get_course(course_overview.id)
             except (ImportError, AttributeError):
-                self.__class__._course_details_cache[course_id_str] = None
-        return self.__class__._course_details_cache.get(course_id_str)
+                cache[course_id_str] = None
 
-    def get_course_requirement(self, course_overview):
-        """
-        Return the course requirement value configured in Studio.
-
-        This maps to the CourseDetails "title" marketing field in Studio,
-        which in this deployment is used to capture course requirements.
-        """
-        course_details = self._get_course_details(course_overview)
-        return getattr(course_details, 'title', None) if course_details else None
-
-    def get_description(self, course_overview):
-        """
-        Return the long description (Studio "description") from CourseDetails.
-        Note: This is distinct from the 'overview' field provided on the detail endpoint.
-        """
-        course_details = self._get_course_details(course_overview)
-        return getattr(course_details, 'description', None) if course_details else None
-
-    def get_learning_outcomes(self, course_overview):
-        """
-        Return learning outcomes as a list of strings from CourseDetails.learning_info.
-        """
-        course_details = self._get_course_details(course_overview)
-        outcomes = getattr(course_details, 'learning_info', None) if course_details else None
-        # Ensure we only return list[str] or None
-        if isinstance(outcomes, (list, tuple)):
-            return [o for o in outcomes if isinstance(o, str)]
-        return None
-
-    def get_instructors(self, course_overview):
-        """
-        Return instructor details excluding media. Each item includes
-        name, title, organization, and bio.
-        """
-        course_details = self._get_course_details(course_overview)
-        instructor_info = getattr(course_details, 'instructor_info', None) if course_details else None
-        instructors = []
-        try:
-            raw_list = (instructor_info or {}).get('instructors', [])
-        except AttributeError:
-            raw_list = []
-        for ins in raw_list:
-            if not isinstance(ins, dict):
-                continue
-            instructors.append({
-                'name': ins.get('name'),
-                'title': ins.get('title'),
-                'organization': ins.get('organization'),
-                'bio': ins.get('bio'),
-            })
-        return instructors or None
+        return cache[course_id_str]
 
 
 class CourseDetailSerializer(CourseSerializer):  # pylint: disable=abstract-method
@@ -241,8 +190,12 @@ class CourseDetailSerializer(CourseSerializer):  # pylint: disable=abstract-meth
     when serializing a single course, and not for serializing a list of
     courses.
     """
-
+    # fields enabled by the extended course detail flag
     overview = serializers.SerializerMethodField()
+    course_requirement = serializers.SerializerMethodField()
+    description = serializers.SerializerMethodField()
+    learning_outcomes = serializers.SerializerMethodField()
+    instructors = serializers.SerializerMethodField()
 
     def get_overview(self, course_overview):
         """
@@ -251,7 +204,100 @@ class CourseDetailSerializer(CourseSerializer):  # pylint: disable=abstract-meth
         # Note: This makes a call to the modulestore, unlike the other
         # fields from CourseSerializer, which get their data
         # from the CourseOverview object in SQL.
-        return CourseDetails.fetch_about_attribute(course_overview.id, 'overview')
+        return self._get_about_attribute(course_overview, "overview")
+
+    def _get_cached_about_attributes(self, course_overview, attributes):
+        """
+        Batch fetch multiple about attributes with instance-level caching.
+
+        Args:
+            course_overview: CourseOverview instance
+            attributes: list of attribute names to fetch
+            
+        Returns:
+            dict mapping attribute names to their values
+        """
+        cache_key = '_about_attributes_instance_cache'
+        cache = getattr(self, cache_key, None)
+        if cache is None:
+            cache = {}
+            setattr(self, cache_key, cache)
+
+        course_id_str = str(course_overview.id)
+        course_cache = cache.setdefault(course_id_str, {})
+        result = {}
+
+        # Fetch any attributes not yet cached for this course
+        for attr in attributes:
+            if attr not in course_cache:
+                course_cache[attr] = CourseDetails.fetch_about_attribute(course_overview.id, attr)
+            result[attr] = course_cache[attr]
+
+        return result
+
+    def _get_about_attribute(self, course_overview, attribute):
+        """Helper to get a single about attribute using the batch cache."""
+        return self._get_cached_about_attributes(course_overview, [attribute])[attribute]
+
+    def get_course_requirement(self, course_overview):
+        """
+        Return the course requirement value configured in Studio.
+
+        This maps to the CourseDetails "title" marketing field in Studio,
+        which in this deployment is used to capture course requirements.
+        """
+        # Studio stores this value in the "title" about attribute; we expose it as Course Requirement.
+        return self._get_about_attribute(course_overview, 'title')
+
+    def get_description(self, course_overview):
+        """
+        Return the long description (Studio "description") from CourseDetails.
+        Note: This is distinct from the 'overview' field provided on the detail endpoint.
+        """
+        return self._get_about_attribute(course_overview, 'description')
+
+    def get_learning_outcomes(self, course_overview):
+        """
+        Return learning outcomes as a list of strings from CourseDetails.learning_info.
+        """
+        course_details = self._get_cached_course_details(course_overview)
+        outcomes = getattr(course_details, 'learning_info', None) if course_details else None
+        # Ensure we only return list[str] or None
+        if isinstance(outcomes, (list, tuple)):
+            return [o for o in outcomes if isinstance(o, str)]
+        return None
+
+    def get_instructors(self, course_overview):
+        """
+        Return instructor details excluding media. Each item includes
+        name, title, organization, and bio.
+        """
+        course_details = self._get_cached_course_details(course_overview)
+        instructor_info = getattr(course_details, 'instructor_info', None) if course_details else None
+        instructors = []
+        request = self.context.get('request') if self.context else None
+        absolute_url_field = AbsoluteURLField() if request else None
+        if absolute_url_field:
+            absolute_url_field._context = {'request': request}  # lint-amnesty, pylint: disable=protected-access
+        try:
+            raw_list = (instructor_info or {}).get('instructors', [])
+        except AttributeError:
+            raw_list = []
+        for ins in raw_list:
+            if not isinstance(ins, dict):
+                continue
+            image_url = ins.get('image')
+            if image_url:
+                if absolute_url_field:
+                    image_url = absolute_url_field.to_representation(image_url)
+            instructors.append({
+                'name': ins.get('name'),
+                'title': ins.get('title'),
+                'organization': ins.get('organization'),
+                'bio': ins.get('bio'),
+                'image': image_url,
+            })
+        return instructors or None
 
     def to_representation(self, instance):
         """
