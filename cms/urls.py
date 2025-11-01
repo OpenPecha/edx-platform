@@ -20,6 +20,7 @@ from cms.djangoapps.contentstore import toggles
 from cms.djangoapps.contentstore import views as contentstore_views
 from cms.djangoapps.contentstore.views.block import xblock_edit_view
 from cms.djangoapps.contentstore.views.organization import OrganizationListView
+from cms.djangoapps.contentstore.views import lead_capture
 from openedx.core.apidocs import api_info
 from openedx.core.djangoapps.password_policy import compliance as password_policy_compliance
 from openedx.core.djangoapps.password_policy.forms import PasswordPolicyAwareAdminAuthForm
@@ -96,6 +97,7 @@ urlpatterns = oauth2_urlpatterns + [
     # restful api
     path('', contentstore_views.howitworks, name='homepage'),
     path('howitworks', contentstore_views.howitworks, name='howitworks'),
+    path('api/howitworks/contact', lead_capture.submit_howitworks_contact, name='submit_howitworks_contact'),
     path('signin_redirect_to_lms', contentstore_views.login_redirect_to_lms, name='login_redirect_to_lms'),
     path('request_course_creator', contentstore_views.request_course_creator, name='request_course_creator'),
     re_path(fr'^course_team/{COURSELIKE_KEY_PATTERN}(?:/(?P<email>.+))?$',
