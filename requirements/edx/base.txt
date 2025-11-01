@@ -1302,5 +1302,9 @@ yarl==1.22.0
 zipp==3.23.0
     # via importlib-metadata
 
+# Google Sheets API integration
+google-api-python-client
+    # via Google Sheets form integration
+
 # The following packages are considered to be unsafe in a requirements file:
 # setuptools
