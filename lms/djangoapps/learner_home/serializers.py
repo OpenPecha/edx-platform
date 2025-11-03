@@ -2,12 +2,10 @@
 Serializers for Learner Home
 """
 
-import logging
 from datetime import date, timedelta
 from urllib.parse import urlencode, urljoin
 
 from django.conf import settings
-from django.contrib.auth import get_user_model
 from django.urls import reverse
 from django.utils import timezone
 from opaque_keys.edx.keys import CourseKey
@@ -15,12 +13,9 @@ from openedx_filters.learning.filters import CourseEnrollmentAPIRenderStarted, C
 from rest_framework import serializers
 
 from common.djangoapps.course_modes.models import CourseMode
-from lms.djangoapps.courseware.courses import get_course_blocks_completion_summary
 from lms.djangoapps.learner_home.utils import course_progress_url
 from openedx.features.course_experience import course_home_url
 from xmodule.data import CertificatesDisplayBehaviors
-
-logger = logging.getLogger(__name__)
 
 
 class LiteralField(serializers.Field):
@@ -472,7 +467,6 @@ class LearnerEnrollmentSerializer(serializers.Serializer):
     gradeData = GradeDataSerializer(source="*")
     programs = serializers.SerializerMethodField()
     credit = serializers.SerializerMethodField()
-    completionSummary = serializers.SerializerMethodField()
 
     def get_entitlement(self, instance):
         """
@@ -504,20 +498,6 @@ class LearnerEnrollmentSerializer(serializers.Serializer):
             return {}
         else:
             return CreditSerializer(credit_status).data
-
-    def get_completionSummary(self, instance):
-        """Include completion summary for current course and user."""
-        user = self.context.get("user")
-        if not user:
-            return {}
-        try:
-            summary = get_course_blocks_completion_summary(instance.course_id, user)
-            return CompletionSummarySerializer(summary).data
-        except Exception as e:  # pylint: disable=broad-except
-            logger.exception(
-                f"[CompletionSummary] Failed for course_id={instance.course_id}, user={user.id}: {e}"
-            )
-            return {}
 
 
 class UnfulfilledEntitlementSerializer(serializers.Serializer):

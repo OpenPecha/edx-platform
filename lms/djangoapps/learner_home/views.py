@@ -46,7 +46,9 @@ from lms.djangoapps.bulk_email.models_api import is_bulk_email_feature_enabled
 from lms.djangoapps.commerce.utils import EcommerceService
 from lms.djangoapps.courseware.access import administrative_accesses_to_course_for_user
 from lms.djangoapps.courseware.access_utils import check_course_open_for_learner
+from lms.djangoapps.courseware.courses import get_course_blocks_completion_summary
 from lms.djangoapps.learner_home.serializers import (
+    CompletionSummarySerializer,
     LearnerDashboardSerializer,
 )
 from lms.djangoapps.learner_home.utils import (
@@ -63,6 +65,7 @@ from openedx.features.enterprise_support.api import (
     enterprise_customer_from_session_or_learner_data,
     get_enterprise_learner_data_from_db,
 )
+from urllib.parse import unquote
 
 logger = logging.getLogger(__name__)
 
@@ -569,9 +572,44 @@ class InitializeView(APIView):  # pylint: disable=unused-argument
             "unfulfilled_entitlement_pseudo_sessions": unfulfilled_entitlement_pseudo_sessions,
             "pseudo_session_course_overviews": pseudo_session_course_overviews,
             "programs": programs,
-            "user": user,
         }
 
         response_data = serialize_learner_home_data(learner_dash_data, context)
 
         return Response(response_data)
+
+
+class CompletionSummaryView(APIView):
+    """
+    Completion summary to show progress bar in dashboard.
+    """
+
+    authentication_classes = (
+        JwtAuthentication,
+        BearerAuthenticationAllowInactiveUser,
+        SessionAuthenticationAllowInactiveUser,
+    )
+    permission_classes = (IsAuthenticated, NotJwtRestrictedApplication)
+
+    def get(self, request, *args, **kwargs):
+        """Get the completion summary for a list of courses"""
+        user = request.user
+        raw_course_ids = request.query_params.getlist("course_ids")
+
+        if not raw_course_ids:
+            return Response({"error": "Missing course_ids"}, status=400)
+
+        data = {}
+        for raw_course_id in raw_course_ids:
+            # We just want to make sure that course_id is properly formatted.
+            # This is just a safeguard, in case it is not handled properly from mfe.
+            course_id = unquote(raw_course_id).replace(" ", "+")
+            try:
+                course_key = CourseKey.from_string(course_id)
+                summary = get_course_blocks_completion_summary(course_key, user)
+                data[course_id] = CompletionSummarySerializer(summary).data
+            except Exception as e:  # pylint: disable=broad-except
+                logger.exception(f"Failed completion summary for {course_id}: {e}")
+                data[course_id] = {}
+
+        return Response(data)
