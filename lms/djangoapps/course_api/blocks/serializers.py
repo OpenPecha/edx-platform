@@ -65,6 +65,8 @@ SUPPORTED_FIELDS = [
     SupportedFieldType(StudentViewTransformer.STUDENT_VIEW_MULTI_DEVICE, StudentViewTransformer),
 
     SupportedFieldType('special_exam_info', MilestonesAndSpecialExamsTransformer),
+    SupportedFieldType('gated_content', MilestonesAndSpecialExamsTransformer),
+    SupportedFieldType('show_gated_sections', MilestonesAndSpecialExamsTransformer),
 
     # set the block_field_name to None so the entire data for the transformer is serialized
     SupportedFieldType(None, BlockCountsTransformer, BlockCountsTransformer.BLOCK_COUNTS),
@@ -116,6 +118,8 @@ FIELDS_ALLOWED_IN_AUTH_DENIED_CONTENT = [
     "authorization_denial_reason",
     "authorization_denial_message",
     'contains_gated_content',
+    'gated_content',
+    'show_gated_sections',
 ]
 
 

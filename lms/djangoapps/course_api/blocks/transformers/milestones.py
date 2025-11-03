@@ -6,6 +6,7 @@ Milestones Transformer
 import logging
 
 from django.conf import settings
+from django.urls import reverse
 from django.utils.translation import gettext as _
 from edx_proctoring.api import get_attempt_status_summary
 from edx_proctoring.exceptions import ProctoredExamNotFoundException
@@ -14,6 +15,8 @@ from common.djangoapps.student.models import EntranceExamConfiguration
 from common.djangoapps.util import milestones_helpers
 from openedx.core.djangoapps.content.block_structure.transformer import BlockStructureTransformer
 from openedx.core.djangoapps.course_apps.toggles import exams_ida_enabled
+from opaque_keys.edx.keys import UsageKey
+from xmodule.modulestore.django import modulestore
 
 log = logging.getLogger(__name__)
 
@@ -85,6 +88,13 @@ class MilestonesAndSpecialExamsTransformer(BlockStructureTransformer):
             elif self.is_special_exam(block_key, block_structure):
                 self.add_special_exam_info(block_key, block_structure, usage_info)
 
+            # Add gated content information for blocks with unmet prerequisites
+            self.add_gated_content_info(block_key, block_structure, usage_info)
+
+        # Propagate gated_content from parent blocks to descendants
+        # This ensures that vertical blocks inside locked sequentials also have gated_content
+        self.propagate_gated_content_to_descendants(block_structure)
+
     @staticmethod
     def is_special_exam(block_key, block_structure):
         """
@@ -131,6 +141,122 @@ class MilestonesAndSpecialExamsTransformer(BlockStructureTransformer):
                 self,
                 'special_exam_info',
                 special_exam_attempt_context,
+            )
+
+    def add_gated_content_info(self, block_key, block_structure, usage_info):
+        """
+        Add gated content information for blocks that have unmet prerequisites.
+        This provides the mobile apps with prerequisite information needed for navigation.
+        """
+        # Only add gated_content info for authenticated users who are not staff
+        if not usage_info.user.is_authenticated or usage_info.has_staff_access:
+            return
+
+        # Check if this block has any unfulfilled milestones
+        unfulfilled_milestones = milestones_helpers.get_course_content_milestones(
+            str(block_key.course_key), str(block_key), "requires", usage_info.user.id
+        )
+
+        if unfulfilled_milestones:
+            # Get the prerequisite information from the first unfulfilled milestone
+            milestone = unfulfilled_milestones[0]
+            prereq_content_key_str = milestone.get("namespace", "").replace(
+                ".gating", ""
+            )
+
+            if prereq_content_key_str:
+                try:
+                    # Get the prerequisite block information
+                    prereq_usage_key = UsageKey.from_string(prereq_content_key_str)
+                    store = modulestore()
+                    prereq_block = store.get_item(prereq_usage_key)
+
+                    # Build the gated_content dictionary
+                    gated_content = {
+                        "prereq_id": str(prereq_usage_key),
+                        "prereq_section_name": prereq_block.display_name,
+                        "gated": True,
+                        "gated_section_name": block_structure.get_xblock_field(
+                            block_key, "display_name"
+                        ),
+                        "prereq_url": reverse(
+                            "jump_to",
+                            kwargs={
+                                "course_id": str(block_key.course_key),
+                                "location": str(prereq_usage_key),
+                            },
+                        ),
+                    }
+
+                    # Set the gated_content field on the block
+                    block_structure.set_transformer_block_field(
+                        block_key,
+                        self,
+                        "gated_content",
+                        gated_content,
+                    )
+                except Exception:  # pylint: disable=broad-except
+                    log.exception(
+                        "Error adding gated_content info for block %s",
+                        block_key,
+                    )
+
+    def propagate_gated_content_to_descendants(self, block_structure):
+        """
+        Propagate gated_content information from parent blocks to all their descendants.
+        This ensures that when the mobile app navigates directly to a vertical (unit) block
+        inside a locked sequential, it still has access to the prerequisite information.
+        """
+        # First pass: collect all blocks with gated_content
+        blocks_with_gated_content = {}
+        for block_key in block_structure.topological_traversal():
+            gated_content = block_structure.get_transformer_block_field(
+                block_key, self, "gated_content"
+            )
+            if gated_content:
+                blocks_with_gated_content[block_key] = gated_content
+
+        # Second pass: propagate to descendants using recursive traversal
+        for parent_key, gated_content in blocks_with_gated_content.items():
+            self._propagate_to_descendants_recursive(
+                block_structure, parent_key, gated_content
+            )
+
+    def _propagate_to_descendants_recursive(
+        self, block_structure, block_key, gated_content
+    ):
+        """
+        Recursively propagate gated_content to all descendants of a block.
+        """
+        children = block_structure.get_children(block_key)
+        if not children:
+            return
+
+        for child_key in children:
+            # Only set if child doesn't already have gated_content
+            child_gated_content = block_structure.get_transformer_block_field(
+                child_key, self, "gated_content"
+            )
+
+            if not child_gated_content:
+                # Update the gated_section_name to reflect the child's name
+                propagated_gated_content = gated_content.copy()
+                child_display_name = block_structure.get_xblock_field(
+                    child_key, "display_name"
+                )
+                if child_display_name:
+                    propagated_gated_content["gated_section_name"] = child_display_name
+
+                block_structure.set_transformer_block_field(
+                    child_key,
+                    self,
+                    "gated_content",
+                    propagated_gated_content,
+                )
+
+            # Recursively propagate to this child's descendants
+            self._propagate_to_descendants_recursive(
+                block_structure, child_key, gated_content
             )
 
     @staticmethod
