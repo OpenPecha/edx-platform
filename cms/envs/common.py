@@ -784,11 +784,6 @@ AWS_S3_CUSTOM_DOMAIN = 'SET-ME-PLEASE (ex. bucket-name.s3.amazonaws.com)'
 
 EDX_ROOT_URL = ''
 
-# Google Sheets Integration Settings
-# Can be overridden in environment-specific settings (e.g., via Tutor plugins)
-GOOGLE_SHEETS_CREDENTIALS_FILE = None
-GOOGLE_SHEETS_SPREADSHEET_ID = None
-
 # use the ratelimit backend to prevent brute force attacks
 AUTHENTICATION_BACKENDS = [
     'auth_backends.backends.EdXOAuth2',
