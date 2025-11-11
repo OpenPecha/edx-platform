@@ -145,61 +145,62 @@ class MilestonesAndSpecialExamsTransformer(BlockStructureTransformer):
 
     def add_gated_content_info(self, block_key, block_structure, usage_info):
         """
-        Add gated content information for blocks that have unmet prerequisites.
+        Add gated content information for blocks that have prerequisites.
         This provides the mobile apps with prerequisite information needed for navigation.
         """
         # Only add gated_content info for authenticated users who are not staff
         if not usage_info.user.is_authenticated or usage_info.has_staff_access:
             return
 
-        # Check if this block has any unfulfilled milestones
+        course_key = str(block_key.course_key)
+        block_key_str = str(block_key)
+
+        # Check if ANY prerequisite milestone exists
+        all_milestones = milestones_helpers.get_course_content_milestones(
+            course_key, block_key_str, "requires"
+        )
+        if not all_milestones:
+            return
+
+        # Check if this user still has unmet prerequisites
         unfulfilled_milestones = milestones_helpers.get_course_content_milestones(
-            str(block_key.course_key), str(block_key), "requires", usage_info.user.id
+            course_key, block_key_str, "requires", usage_info.user.id
         )
 
-        if unfulfilled_milestones:
-            # Get the prerequisite information from the first unfulfilled milestone
-            milestone = unfulfilled_milestones[0]
-            prereq_content_key_str = milestone.get("namespace", "").replace(
-                ".gating", ""
+        milestone = (unfulfilled_milestones or all_milestones)[0]
+        gated = bool(unfulfilled_milestones)
+
+        prereq_content_key_str = milestone.get("namespace", "").replace(".gating", "")
+        if not prereq_content_key_str:
+            return
+
+        try:
+            prereq_usage_key = UsageKey.from_string(prereq_content_key_str)
+            store = modulestore()
+            prereq_block = store.get_item(prereq_usage_key)
+
+            gated_content = {
+                "prereq_id": str(prereq_usage_key),
+                "prereq_section_name": prereq_block.display_name,
+                "gated": gated,
+                "gated_section_name": block_structure.get_xblock_field(
+                    block_key, "display_name"
+                ),
+                "prereq_url": reverse(
+                    "jump_to",
+                    kwargs={"course_id": course_key, "location": str(prereq_usage_key)},
+                ),
+            }
+
+            block_structure.set_transformer_block_field(
+                block_key,
+                self,
+                "gated_content",
+                gated_content,
             )
 
-            if prereq_content_key_str:
-                try:
-                    # Get the prerequisite block information
-                    prereq_usage_key = UsageKey.from_string(prereq_content_key_str)
-                    store = modulestore()
-                    prereq_block = store.get_item(prereq_usage_key)
-
-                    # Build the gated_content dictionary
-                    gated_content = {
-                        "prereq_id": str(prereq_usage_key),
-                        "prereq_section_name": prereq_block.display_name,
-                        "gated": True,
-                        "gated_section_name": block_structure.get_xblock_field(
-                            block_key, "display_name"
-                        ),
-                        "prereq_url": reverse(
-                            "jump_to",
-                            kwargs={
-                                "course_id": str(block_key.course_key),
-                                "location": str(prereq_usage_key),
-                            },
-                        ),
-                    }
-
-                    # Set the gated_content field on the block
-                    block_structure.set_transformer_block_field(
-                        block_key,
-                        self,
-                        "gated_content",
-                        gated_content,
-                    )
-                except Exception:  # pylint: disable=broad-except
-                    log.exception(
-                        "Error adding gated_content info for block %s",
-                        block_key,
-                    )
+        except Exception:  # pylint: disable=broad-except
+            log.exception("Error adding gated_content info for block %s", block_key)
 
     def propagate_gated_content_to_descendants(self, block_structure):
         """
