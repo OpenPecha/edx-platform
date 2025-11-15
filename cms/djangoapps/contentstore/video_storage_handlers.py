@@ -19,6 +19,7 @@ from datetime import datetime, timedelta
 from uuid import uuid4
 from boto.s3.connection import S3Connection
 from boto import s3
+import boto3
 from django.conf import settings
 from django.contrib.staticfiles.storage import staticfiles_storage
 from django.http import FileResponse, HttpResponseNotFound, StreamingHttpResponse
@@ -826,32 +827,29 @@ def videos_post(course, request):
             return {'error': error_msg}, 400
 
         edx_video_id = str(uuid4())
-        key = storage_service_key(bucket, file_name=edx_video_id)
-
-        metadata_list = [
-            ('client_video_id', file_name),
-            ('course_key', str(course.id)),
-        ]
-
-        course_video_upload_token = course.video_upload_pipeline.get('course_video_upload_token')
-
-        # Only include `course_video_upload_token` if youtube has not been deprecated
-        # for this course.
-        if not DEPRECATE_YOUTUBE.is_enabled(course.id) and course_video_upload_token:
-            metadata_list.append(('course_video_upload_token', course_video_upload_token))
-
-        is_video_transcript_enabled = VideoTranscriptEnabledFlag.feature_enabled(course.id)
-        if is_video_transcript_enabled:
-            transcript_preferences = get_transcript_preferences(str(course.id))
-            if transcript_preferences is not None:
-                metadata_list.append(('transcript_preferences', json.dumps(transcript_preferences)))
-
-        for metadata_name, value in metadata_list:
-            key.set_metadata(metadata_name, value)
-        upload_url = key.generate_url(
-            KEY_EXPIRATION_IN_SECONDS,
-            'PUT',
-            headers={'Content-Type': req_file['content_type']}
+        
+        # Use boto3 to generate presigned URL without metadata
+        # Metadata is not needed on S3 object since VAL stores all video info in DB
+        s3_client = boto3.client(
+            's3',
+            region_name='ap-south-1',
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        )
+        
+        key_name = "{}/{}".format(
+            settings.VIDEO_UPLOAD_PIPELINE.get("ROOT_PATH", ""),
+            edx_video_id
+        )
+        
+        # Generate presigned URL without metadata to avoid signature mismatch
+        upload_url = s3_client.generate_presigned_url(
+            'put_object',
+            Params={
+                'Bucket': settings.VIDEO_UPLOAD_PIPELINE['BUCKET'],
+                'Key': key_name
+            },
+            ExpiresIn=KEY_EXPIRATION_IN_SECONDS
         )
 
         # persist edx_video_id in VAL
@@ -886,7 +884,8 @@ def storage_service_bucket():
             'aws_secret_access_key': settings.AWS_SECRET_ACCESS_KEY
         }
 
-    conn = S3Connection(**params)
+    # Force signature version 4 for regions outside us-east-1
+    conn = S3Connection(host='s3.ap-south-1.amazonaws.com', **params)
 
     # We don't need to validate our bucket, it requires a very permissive IAM permission
     # set since behind the scenes it fires a HEAD request that is equivalent to get_all_keys()
@@ -910,12 +909,25 @@ def send_video_status_update(updates):
     """
     Update video status in edx-val.
     """
+    mark_ready_on_completion = settings.VIDEO_UPLOAD_PIPELINE.get('MARK_READY_ON_UPLOAD_COMPLETE', False)
+
     for update in updates:
-        update_video_status(update.get('edxVideoId'), update.get('status'))
+        edx_video_id = update.get('edxVideoId')
+        status = update.get('status')
+
+        update_video_status(edx_video_id, status)
+
+        if mark_ready_on_completion and status == 'upload_completed':
+            update_video_status(edx_video_id, 'file_complete')
+            LOGGER.info(
+                'VIDEOS: Auto-advancing video status to [file_complete] for id [%s]',
+                edx_video_id
+            )
+
         LOGGER.info(
             'VIDEOS: Video status update with id [%s], status [%s] and message [%s]',
-            update.get('edxVideoId'),
-            update.get('status'),
+            edx_video_id,
+            status,
             update.get('message')
         )
 

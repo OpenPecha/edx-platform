@@ -2,7 +2,6 @@
 Helper functions for the accounts API.
 """
 
-
 import hashlib
 
 from django.conf import settings
@@ -16,7 +15,9 @@ from openedx.core.djangoapps.site_configuration import helpers as configuration_
 
 from ..errors import UserNotFound
 
-PROFILE_IMAGE_FILE_EXTENSION = 'jpg'   # All processed profile images are converted to JPEGs
+PROFILE_IMAGE_FILE_EXTENSION = (
+    "jpg"  # All processed profile images are converted to JPEGs
+)
 
 _PROFILE_IMAGE_SIZES = list(settings.PROFILE_IMAGE_SIZES_MAP.values())
 
@@ -52,7 +53,8 @@ def get_profile_image_storage():
     # Legacy fallback: PROFILE_IMAGE_BACKEND
     config = getattr(settings, 'PROFILE_IMAGE_BACKEND', {})
     storage_class_path = config.get('class')
-    options = config.get('options', {})
+    options = dict(config.get("options", {}))
+    options.pop("base_url", None)
 
     if not storage_class_path:
         return default_storage
@@ -67,21 +69,26 @@ def _make_profile_image_name(username):
     the username.
     """
     hash_input = settings.PROFILE_IMAGE_HASH_SEED + username
-    return hashlib.md5(hash_input.encode('utf-8')).hexdigest()
+    return hashlib.md5(hash_input.encode("utf-8")).hexdigest()
 
 
-def _get_profile_image_filename(name, size, file_extension=PROFILE_IMAGE_FILE_EXTENSION):
+def _get_profile_image_filename(
+    name, size, file_extension=PROFILE_IMAGE_FILE_EXTENSION
+):
     """
     Returns the full filename for a profile image, given the name and size.
     """
-    return f'{name}_{size}.{file_extension}'
+    return f"{name}_{size}.{file_extension}"
 
 
-def _get_profile_image_urls(name, storage, file_extension=PROFILE_IMAGE_FILE_EXTENSION, version=None):
+def _get_profile_image_urls(
+    name, storage, file_extension=PROFILE_IMAGE_FILE_EXTENSION, version=None
+):
     """
     Returns a dict containing the urls for a complete set of profile images,
     keyed by "friendly" name (e.g. "full", "large", "medium", "small").
     """
+
     def _make_url(size):
         url = storage.url(
             _get_profile_image_filename(name, size, file_extension=file_extension)
@@ -90,10 +97,13 @@ def _get_profile_image_urls(name, storage, file_extension=PROFILE_IMAGE_FILE_EXT
         # string with "?v=". If the original URL already includes a
         # query string (such as signed S3 URLs), append to the query
         # string with "&v=" instead.
-        separator = '&' if '?' in url else '?'
-        return f'{url}{separator}v={version}' if version is not None else url
+        separator = "&" if "?" in url else "?"
+        return f"{url}{separator}v={version}" if version is not None else url
 
-    return {size_display_name: _make_url(size) for size_display_name, size in settings.PROFILE_IMAGE_SIZES_MAP.items()}
+    return {
+        size_display_name: _make_url(size)
+        for size_display_name, size in settings.PROFILE_IMAGE_SIZES_MAP.items()
+    }
 
 
 def get_profile_image_names(username):
@@ -102,7 +112,9 @@ def get_profile_image_names(username):
     images, keyed by pixel size.
     """
     name = _make_profile_image_name(username)
-    return {size: _get_profile_image_filename(name, size) for size in _PROFILE_IMAGE_SIZES}
+    return {
+        size: _get_profile_image_filename(name, size) for size in _PROFILE_IMAGE_SIZES
+    }
 
 
 def get_profile_image_urls_for_user(user, request=None):
@@ -154,7 +166,9 @@ def _get_default_profile_image_urls():
     TODO The result of this function should be memoized, but not in tests.
     """
     return _get_profile_image_urls(
-        configuration_helpers.get_value('PROFILE_IMAGE_DEFAULT_FILENAME', settings.PROFILE_IMAGE_DEFAULT_FILENAME),
+        configuration_helpers.get_value(
+            "PROFILE_IMAGE_DEFAULT_FILENAME", settings.PROFILE_IMAGE_DEFAULT_FILENAME
+        ),
         staticfiles_storage,
         file_extension=settings.PROFILE_IMAGE_DEFAULT_FILE_EXTENSION,
     )
