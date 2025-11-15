@@ -901,7 +901,9 @@ def course_about(request, course_id):  # pylint: disable=too-many-statements
         can_enroll = bool(request.user.has_perm(ENROLL_IN_COURSE, course))
         invitation_only = course_is_invitation_only(course)
         is_course_full = CourseEnrollment.objects.is_course_full(course)
-
+        enrolled_students_count = (
+            CourseEnrollment.objects.num_enrolled_in_exclude_admins(course.id)
+        )
         # Register button should be disabled if one of the following is true:
         # - Student is already registered for course
         # - Course is already full
@@ -921,33 +923,36 @@ def course_about(request, course_id):  # pylint: disable=too-many-statements
         allow_anonymous = check_public_access(course, [COURSE_VISIBILITY_PUBLIC, COURSE_VISIBILITY_PUBLIC_OUTLINE])
 
         context = {
-            'course': course,
-            'course_details': course_details,
-            'staff_access': staff_access,
-            'studio_url': studio_url,
-            'registered': registered,
-            'course_target': course_target,
-            'is_cosmetic_price_enabled': settings.FEATURES.get('ENABLE_COSMETIC_DISPLAY_PRICE'),
-            'course_price': course_price,
-            'course_mode_price_display': course_mode_price_display,
-            'ecommerce_checkout': ecommerce_checkout,
-            'ecommerce_checkout_link': ecommerce_checkout_link,
-            'ecommerce_bulk_checkout_link': ecommerce_bulk_checkout_link,
-            'single_paid_mode': single_paid_mode,
-            'single_paid_mode_product_url': single_paid_mode_product_url,
-            'show_courseware_link': show_courseware_link,
-            'is_course_full': is_course_full,
-            'can_enroll': can_enroll,
-            'invitation_only': invitation_only,
-            'active_reg_button': active_reg_button,
-            'is_shib_course': is_shib_course,
+            "course": course,
+            "course_details": course_details,
+            "staff_access": staff_access,
+            "studio_url": studio_url,
+            "registered": registered,
+            "course_target": course_target,
+            "is_cosmetic_price_enabled": settings.FEATURES.get(
+                "ENABLE_COSMETIC_DISPLAY_PRICE"
+            ),
+            "course_price": course_price,
+            "course_mode_price_display": course_mode_price_display,
+            "ecommerce_checkout": ecommerce_checkout,
+            "ecommerce_checkout_link": ecommerce_checkout_link,
+            "ecommerce_bulk_checkout_link": ecommerce_bulk_checkout_link,
+            "single_paid_mode": single_paid_mode,
+            "single_paid_mode_product_url": single_paid_mode_product_url,
+            "show_courseware_link": show_courseware_link,
+            "is_course_full": is_course_full,
+            "enrolled_students_count": enrolled_students_count,
+            "can_enroll": can_enroll,
+            "invitation_only": invitation_only,
+            "active_reg_button": active_reg_button,
+            "is_shib_course": is_shib_course,
             # We do not want to display the internal courseware header, which is used when the course is found in the
             # context. This value is therefore explicitly set to render the appropriate header.
-            'disable_courseware_header': True,
-            'pre_requisite_courses': pre_requisite_courses,
-            'course_image_urls': overview.image_urls,
-            'sidebar_html_enabled': sidebar_html_enabled,
-            'allow_anonymous': allow_anonymous,
+            "disable_courseware_header": True,
+            "pre_requisite_courses": pre_requisite_courses,
+            "course_image_urls": overview.image_urls,
+            "sidebar_html_enabled": sidebar_html_enabled,
+            "allow_anonymous": allow_anonymous,
         }
 
         course_about_template = 'courseware/course_about.html'
