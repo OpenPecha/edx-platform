@@ -824,3 +824,286 @@ class S3ContentStore(ContentStore):
         except Exception as e:
             log.error("Error generating presigned URL for %s: %s", location, str(e))
             raise
+
+
+class S3ContentStoreWithMongoFallback(S3ContentStore):
+    """
+    S3 ContentStore with MongoDB fallback for existing assets.
+
+    This class extends S3ContentStore to provide backward compatibility during
+    migration from MongoDB to S3. When an asset is not found in S3, it falls
+    back to MongoDB GridFS to serve existing content.
+
+    New uploads always go to S3. Reads check S3 first, then MongoDB.
+
+    The MongoDB connection uses the existing DOC_STORE_CONFIG from Django settings,
+    which Tutor already configures. No additional MongoDB configuration needed.
+
+    Configuration example:
+        CONTENTSTORE = {
+            'ENGINE': 'openedx.core.djangoapps.s3_contentstore.s3.S3ContentStoreWithMongoFallback',
+            'DOC_STORE_CONFIG': {
+                'bucket': 'my-edx-course-assets',
+                'region_name': 'us-east-1',
+                'access_key': '...',
+                'secret_key': '...',
+            },
+        }
+
+    Once migration is complete, switch to S3ContentStore (without fallback).
+    """
+
+    def __init__(self, **kwargs):
+        """
+        Initialize S3ContentStore with MongoDB fallback.
+
+        MongoDB settings are read from Django's DOC_STORE_CONFIG automatically.
+        Only S3 settings need to be passed.
+        """
+        # Initialize S3 store (parent class)
+        super().__init__(**kwargs)
+
+        # Lazy initialization for MongoDB store
+        self._mongo_store = None
+
+        log.info(
+            "S3ContentStoreWithMongoFallback initialized. "
+            "S3 bucket: %s, MongoDB fallback enabled (using DOC_STORE_CONFIG).",
+            self.bucket,
+        )
+
+    def _get_mongo_store(self):
+        """
+        Lazily initialize and return the MongoDB ContentStore.
+
+        Uses DOC_STORE_CONFIG from Django settings, which Tutor already configures.
+
+        Returns:
+            MongoContentStore instance or None if initialization fails
+        """
+        if self._mongo_store is not None:
+            return self._mongo_store
+
+        try:
+            from xmodule.contentstore.mongo import MongoContentStore
+
+            # Use DOC_STORE_CONFIG directly - Tutor already sets this up
+            doc_store_config = getattr(settings, "DOC_STORE_CONFIG", {})
+
+            if not doc_store_config:
+                log.warning("DOC_STORE_CONFIG not found, MongoDB fallback disabled")
+                return None
+
+            self._mongo_store = MongoContentStore(**doc_store_config)
+            log.info("MongoDB fallback ContentStore initialized using DOC_STORE_CONFIG")
+
+            return self._mongo_store
+
+        except Exception as e:
+            log.error("Failed to initialize MongoDB fallback: %s", str(e))
+            return None
+
+    def find(self, location, throw_on_not_found=True, as_stream=False):
+        """
+        Find content, checking S3 first then falling back to MongoDB.
+
+        Args:
+            location: AssetKey identifying the asset
+            throw_on_not_found: If True, raise NotFoundError when not found
+            as_stream: If True, return StaticContentStream for streaming
+
+        Returns:
+            StaticContent or StaticContentStream, or None if not found
+        """
+        # Try S3 first
+        try:
+            content = super().find(
+                location, throw_on_not_found=False, as_stream=as_stream
+            )
+            if content is not None:
+                log.debug("Asset found in S3: %s", location)
+                return content
+        except Exception as e:
+            log.debug("S3 lookup failed for %s: %s", location, str(e))
+
+        # Fall back to MongoDB
+        log.debug("Asset not in S3, trying MongoDB fallback: %s", location)
+        mongo_store = self._get_mongo_store()
+
+        if mongo_store is None:
+            if throw_on_not_found:
+                raise NotFoundError(str(location))
+            return None
+
+        try:
+            content = mongo_store.find(
+                location, throw_on_not_found=throw_on_not_found, as_stream=as_stream
+            )
+            if content is not None:
+                log.info("Asset found in MongoDB (fallback): %s", location)
+            return content
+        except NotFoundError:
+            if throw_on_not_found:
+                raise
+            return None
+        except Exception as e:
+            log.error("MongoDB fallback error for %s: %s", location, str(e))
+            if throw_on_not_found:
+                raise NotFoundError(str(location))
+            return None
+
+    def get_all_content_for_course(
+        self, course_key, start=0, maxresults=-1, sort=None, filter_params=None
+    ):
+        """
+        Get all content for a course, merging S3 and MongoDB results.
+
+        Returns assets from both S3 and MongoDB, with S3 taking precedence
+        for assets that exist in both stores.
+        """
+        # Get S3 assets
+        s3_assets, s3_count = super().get_all_content_for_course(
+            course_key, start=0, maxresults=-1, sort=sort, filter_params=filter_params
+        )
+
+        # Build set of S3 asset keys for deduplication
+        s3_asset_keys = {str(a["asset_key"]) for a in s3_assets}
+
+        # Get MongoDB assets
+        mongo_assets = []
+        mongo_store = self._get_mongo_store()
+        if mongo_store:
+            try:
+                mongo_result, _ = mongo_store.get_all_content_for_course(
+                    course_key,
+                    start=0,
+                    maxresults=-1,
+                    sort=sort,
+                    filter_params=filter_params,
+                )
+                # Only include MongoDB assets not already in S3
+                for asset in mongo_result:
+                    asset_key_str = str(asset.get("asset_key", ""))
+                    if asset_key_str and asset_key_str not in s3_asset_keys:
+                        mongo_assets.append(asset)
+                        log.debug("Including MongoDB asset: %s", asset_key_str)
+            except Exception as e:
+                log.warning(
+                    "Error getting MongoDB assets for %s: %s", course_key, str(e)
+                )
+
+        # Merge results
+        all_assets = s3_assets + mongo_assets
+        total_count = len(all_assets)
+
+        # Apply sorting if needed (assets from different sources)
+        if sort and mongo_assets:
+            # Re-sort the merged list
+            for field, direction in reversed(sort):
+                reverse = direction == -1
+                if field == "displayname":
+                    all_assets.sort(
+                        key=lambda x: x.get("displayname", ""), reverse=reverse
+                    )
+                elif field == "uploadDate":
+                    all_assets.sort(key=lambda x: x.get("uploadDate"), reverse=reverse)
+                elif field == "contentType":
+                    all_assets.sort(
+                        key=lambda x: x.get("contentType", ""), reverse=reverse
+                    )
+
+        # Apply pagination
+        if maxresults > 0:
+            all_assets = all_assets[start : start + maxresults]
+        elif start > 0:
+            all_assets = all_assets[start:]
+
+        return all_assets, total_count
+
+    def get_all_content_thumbnails_for_course(self, course_key):
+        """Get thumbnails from both S3 and MongoDB."""
+        # Get S3 thumbnails
+        s3_thumbnails = super().get_all_content_thumbnails_for_course(course_key)
+        s3_thumb_keys = {str(t) for t in s3_thumbnails} if s3_thumbnails else set()
+
+        # Get MongoDB thumbnails
+        mongo_thumbnails = []
+        mongo_store = self._get_mongo_store()
+        if mongo_store:
+            try:
+                mongo_result = mongo_store.get_all_content_thumbnails_for_course(
+                    course_key
+                )
+                if mongo_result:
+                    for thumb in mongo_result:
+                        if str(thumb) not in s3_thumb_keys:
+                            mongo_thumbnails.append(thumb)
+            except Exception as e:
+                log.warning("Error getting MongoDB thumbnails: %s", str(e))
+
+        return (s3_thumbnails or []) + mongo_thumbnails
+
+    def get_attr(self, location, attr, default=None):
+        """Get attribute, checking S3 first then MongoDB."""
+        try:
+            return super().get_attr(location, attr, default)
+        except NotFoundError:
+            mongo_store = self._get_mongo_store()
+            if mongo_store:
+                try:
+                    return mongo_store.get_attr(location, attr, default)
+                except Exception:
+                    pass
+            return default
+
+    def get_attrs(self, location):
+        """Get all attributes, checking S3 first then MongoDB."""
+        try:
+            return super().get_attrs(location)
+        except NotFoundError:
+            mongo_store = self._get_mongo_store()
+            if mongo_store:
+                return mongo_store.get_attrs(location)
+            raise
+
+    def export(self, location, output_directory):
+        """Export asset, checking S3 first then MongoDB."""
+        try:
+            return super().export(location, output_directory)
+        except NotFoundError:
+            mongo_store = self._get_mongo_store()
+            if mongo_store:
+                return mongo_store.export(location, output_directory)
+            raise
+
+    def export_all_for_course(self, course_key, output_directory, assets_policy_file):
+        """Export all course assets from both S3 and MongoDB."""
+        policy = {}
+        assets, _ = self.get_all_content_for_course(course_key)
+
+        for asset in assets:
+            try:
+                asset_key = asset.get("asset_key")
+                if not asset_key:
+                    continue
+
+                # Try to export (will check S3 then MongoDB)
+                self.export(asset_key, output_directory)
+
+                for attr, value in asset.items():
+                    if attr not in [
+                        "_id",
+                        "md5",
+                        "uploadDate",
+                        "length",
+                        "chunkSize",
+                        "asset_key",
+                    ]:
+                        policy.setdefault(asset_key.block_id, {})[attr] = value
+            except Exception as e:
+                log.exception(
+                    "Failed to export asset %s: %s", asset.get("asset_key"), str(e)
+                )
+
+        with open(assets_policy_file, "w") as f:
+            json.dump(policy, f, sort_keys=True, indent=4)
