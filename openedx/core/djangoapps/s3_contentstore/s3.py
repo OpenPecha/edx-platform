@@ -155,6 +155,49 @@ class S3ContentStore(ContentStore):
 
         return f"{org}_{course}_{run}/{location.block_type}/{location.block_id}"
 
+    def _find_thumbnail_by_base_name(self, location):
+        """
+        Find a thumbnail by base name when exact match is not found.
+
+        The upstream code may look for a thumbnail with the original asset's block_id
+        (e.g., 'image.png'), but thumbnails are actually stored with a different naming
+        convention (e.g., 'image-png-128x128.jpg'). This method handles that mismatch
+        by searching for thumbnails that match the base pattern.
+
+        Args:
+            location: AssetKey for the thumbnail being searched
+
+        Returns:
+            S3AssetMetadata object if found, None otherwise
+        """
+        # Only apply this logic for thumbnail lookups
+        if not hasattr(location, 'block_type') or location.block_type != 'thumbnail':
+            return None
+
+        # Get the base name without extension
+        block_id = location.block_id
+        if '.' in block_id:
+            base_name = block_id.rsplit('.', 1)[0]
+        else:
+            base_name = block_id
+
+        # Build a pattern to match thumbnails for this course with similar base name
+        course_key_str = str(location.course_key)
+
+        # Search for thumbnails that start with the base name pattern
+        # Thumbnail naming convention: {base_name}-{ext}-{dimensions}.jpg
+        # e.g., "image-png-128x128.jpg" for original "image.png"
+        matching_thumbnails = S3AssetMetadata.objects.filter(
+            course_key_str=course_key_str,
+            location_str__contains='type@thumbnail',
+            asset_name__startswith=base_name
+        ).order_by('-created_at')
+
+        if matching_thumbnails.exists():
+            return matching_thumbnails.first()
+
+        return None
+
     def save(self, content):
         """
         Save content to S3.
@@ -289,10 +332,14 @@ class S3ContentStore(ContentStore):
 
         try:
             metadata = S3AssetMetadata.objects.get(location_str=location_str)
-        except S3AssetMetadata.DoesNotExist as exc:
-            if throw_on_not_found:
-                raise NotFoundError(location_str) from exc
-            return None
+        except S3AssetMetadata.DoesNotExist:
+            # If this is a thumbnail request and exact match not found,
+            # try to find thumbnail by partial match (handles thumbnail naming convention)
+            metadata = self._find_thumbnail_by_base_name(filename)
+            if metadata is None:
+                if throw_on_not_found:
+                    raise NotFoundError(location_str)
+                return None
 
         try:
             # Get file from S3
