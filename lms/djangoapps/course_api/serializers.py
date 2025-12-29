@@ -5,6 +5,7 @@ Course API Serializers.  Representing course catalog data
 
 import urllib
 
+from common.djangoapps.course_modes.models import CourseMode
 from common.djangoapps.student.models import CourseEnrollment
 from django.contrib.auth import get_user_model
 from django.urls import reverse
@@ -196,6 +197,7 @@ class CourseDetailSerializer(CourseSerializer):  # pylint: disable=abstract-meth
     description = serializers.SerializerMethodField()
     learning_outcomes = serializers.SerializerMethodField()
     instructors = serializers.SerializerMethodField()
+    purchase_link = serializers.SerializerMethodField()
 
     def get_overview(self, course_overview):
         """
@@ -298,6 +300,28 @@ class CourseDetailSerializer(CourseSerializer):  # pylint: disable=abstract-meth
                 'image': image_url,
             })
         return instructors or None
+
+    def get_purchase_link(self, course_overview):
+        """
+        Return the purchase link (product_url) from CourseMode.
+        Assumes there is only a single paid course mode (verified) per course.
+        Returns None if no verified mode exists or no product_url is set.
+        """
+        try:
+            # Get the verified mode for this course
+            verified_mode = (
+                CourseMode.objects.filter(
+                    course_id=course_overview.id, mode_slug=CourseMode.VERIFIED
+                )
+                .exclude(product_url="")
+                .exclude(product_url__isnull=True)
+                .first()
+            )
+
+            return verified_mode.product_url if verified_mode else None
+
+        except Exception:  # lint-amnesty, pylint: disable=broad-except
+            return None
 
     def to_representation(self, instance):
         """
