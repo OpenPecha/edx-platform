@@ -14,9 +14,12 @@ from lms.djangoapps.learner_dashboard.programs import (
     ProgramDiscussionLTI,
     ProgramsFragmentView, ProgramLiveLTI
 )
+from openedx.core.djangoapps.catalog.utils import get_programs
+from openedx.core.djangoapps.programs.utils import attach_program_detail_url
 from lms.djangoapps.program_enrollments.rest_api.v1.utils import ProgramSpecificViewMixin
 from openedx.core.djangoapps.programs.models import ProgramsApiConfig
 from openedx.core.lib.api.authentication import BearerAuthentication
+from django.http import Http404
 
 
 @login_required
@@ -57,6 +60,25 @@ def program_details(request, program_uuid):
     }
 
     return render_to_response('learner_dashboard/program_details.html', context)
+
+
+@login_required
+@require_GET
+def program_catalog(request):
+    """View for listing all the programs available on the platform."""
+    programs_config = ProgramsApiConfig.current()
+    if not programs_config.enabled:
+        raise Http404
+
+    programs = get_programs(request.site)
+    programs = attach_program_detail_url(programs)
+
+    context = {
+        'programs': programs,
+        'show_program_listing': programs_config.enabled
+    }
+
+    return render_to_response('learner_dashboard/program_catalog.html', context)
 
 
 class ProgramDiscussionIframeView(APIView, ProgramSpecificViewMixin):
