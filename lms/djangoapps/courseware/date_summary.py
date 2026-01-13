@@ -270,7 +270,7 @@ class CourseStartDate(DateSummary):
         enrollment = CourseEnrollment.get_enrollment(self.user, self.course_id)
         if self.course.self_paced and enrollment and self.course.start and enrollment.created > self.course.start:
             return gettext_lazy('Enrollment Date')
-        return gettext_lazy('Course starts')
+        return gettext_lazy('Course Release Date')
 
 
 class CourseEndDate(DateSummary):
@@ -278,7 +278,7 @@ class CourseEndDate(DateSummary):
     Displays the end date of the course.
     """
     css_class = 'end-date'
-    title = gettext_lazy('Course ends')
+    title = gettext_lazy('Course Archive Date')
     is_enabled = True
 
     @property
