@@ -44,7 +44,7 @@ from lms.djangoapps.courseware.toggles import courseware_disable_navigation_side
 from lms.djangoapps.courseware.views.views import get_cert_data
 from lms.djangoapps.grades.course_grade_factory import CourseGradeFactory
 from lms.djangoapps.utils import OptimizelyClient
-from openedx.core.djangoapps.content.learning_sequences.api import get_user_course_outline
+from openedx.core.djangoapps.content.learning_sequences.api import get_user_course_outline, get_user_course_outline_details
 from openedx.core.djangoapps.content.course_overviews.api import get_course_overview_or_404
 from openedx.core.djangoapps.course_groups.cohorts import get_cohort
 from openedx.core.lib.api.authentication import BearerAuthenticationAllowInactiveUser
@@ -55,7 +55,7 @@ from openedx.features.course_experience.course_updates import (
     dismiss_current_update_for_user,
     get_current_update_for_user
 )
-from openedx.features.course_experience.url_helpers import get_learning_mfe_home_url
+from openedx.features.course_experience.url_helpers import get_learning_mfe_home_url, make_learning_mfe_courseware_url
 from openedx.features.course_experience.utils import get_course_outline_block_tree, get_start_block
 from openedx.features.discounts.utils import generate_offer_data
 from xblock.core import XBlock
@@ -67,6 +67,39 @@ class UnableToDismissWelcomeMessage(APIException):
     status_code = 400
     default_detail = 'Unable to dismiss welcome message.'
     default_code = 'unable_to_dismiss_welcome_message'
+
+
+def _filter_blocks_by_outline(course_blocks, course_key, user):
+    """
+    Filter course_blocks so that only sections and sequences visible in the
+    Learning Sequences outline for *user* are kept.
+    """
+    if not course_blocks:
+        return course_blocks
+
+    user_course_outline = get_user_course_outline(
+        course_key, user, datetime.now(tz=timezone.utc)
+    )
+    available_seq_ids = {str(usage_key) for usage_key in user_course_outline.sequences}
+    available_section_ids = {str(section.usage_key) for section in user_course_outline.sections}
+
+    course_blocks['children'] = [
+        chapter_data
+        for chapter_data in course_blocks.get('children', [])
+        if chapter_data['id'] in available_section_ids
+    ]
+
+    for chapter_data in course_blocks['children']:
+        chapter_data['children'] = [
+            seq_data
+            for seq_data in chapter_data['children']
+            if (
+                seq_data['id'] in available_seq_ids or
+                seq_data['type'] != 'sequential'
+            )
+        ] if 'children' in chapter_data else []
+
+    return course_blocks
 
 
 class UnableToSaveCourseGoal(APIException):
@@ -181,6 +214,52 @@ class OutlineTabView(RetrieveAPIView):
 
     serializer_class = OutlineTabSerializer
 
+    def _build_course_blocks(self, course, course_overview, course_key, user):
+        now = datetime.now(tz=timezone.utc)
+        uco_details = get_user_course_outline_details(course_key, user, now)
+        uco = uco_details.outline
+        schedule = uco_details.schedule
+        accessible_seq_keys = uco.accessible_sequences
+        section_blocks = []
+        course_has_scheduled = False
+        for section in uco.sections:
+            seq_blocks = []
+            section_has_scheduled = False
+            for seq in section.sequences:
+                seq_schedule = schedule.sequences.get(seq.usage_key)
+                seq_block = {
+                    'id': str(seq.usage_key),
+                    'type': 'sequential',
+                    'display_name': seq.title,
+                    'lms_web_url': make_learning_mfe_courseware_url(course_key=course.id, sequence_key=seq.usage_key),
+                    'children': [],
+                }
+                if seq_schedule:
+                    seq_block['due'] = seq_schedule.due
+                    if seq_schedule.effective_start and seq_schedule.effective_start > now:
+                        section_has_scheduled = True
+                if seq.usage_key not in accessible_seq_keys:
+                    section_has_scheduled = True
+                seq_blocks.append(seq_block)
+            if section_has_scheduled:
+                course_has_scheduled = True
+            section_blocks.append({
+                'id': str(section.usage_key),
+                'type': 'chapter',
+                'display_name': section.title,
+                'lms_web_url': make_learning_mfe_courseware_url(course_key=course.id, sequence_key=section.usage_key),
+                'children': seq_blocks,
+                'has_scheduled_content': section_has_scheduled,
+            })
+        return {
+            'id': str(course.id),
+            'type': 'course',
+            'display_name': course_overview.display_name,
+            'lms_web_url': get_learning_mfe_home_url(course_key=course.id),
+            'children': section_blocks,
+            'has_scheduled_content': course_has_scheduled,
+        }
+
     def get(self, request, *args, **kwargs):  # pylint: disable=too-many-statements
         course_key_string = kwargs.get('course_key_string')
         course_key = CourseKey.from_string(course_key_string)
@@ -245,7 +324,7 @@ class OutlineTabView(RetrieveAPIView):
         show_enrolled = is_enrolled or is_staff
         enable_proctored_exams = False
         if show_enrolled:
-            course_blocks = get_course_outline_block_tree(request, course_key_string, request.user)
+            course_blocks = self._build_course_blocks(course, course_overview, course_key, request.user)
             date_blocks = get_course_date_blocks(course, request.user, request, num_assignments=1)
             dates_widget['course_date_blocks'] = [block for block in date_blocks if not isinstance(block, TodaysDate)]
 
@@ -280,7 +359,7 @@ class OutlineTabView(RetrieveAPIView):
                 resume_course['url'] = start_block['lms_web_url']
 
         elif allow_public_outline or allow_public or user_is_masquerading:
-            course_blocks = get_course_outline_block_tree(request, course_key_string, None)
+            course_blocks = self._build_course_blocks(course, course_overview, course_key, request.user)
             if allow_public or user_is_masquerading:
                 handouts_html = get_course_info_section(request, request.user, course, 'handouts')
 
@@ -305,37 +384,7 @@ class OutlineTabView(RetrieveAPIView):
         #
         # The long term goal is to remove the Course Blocks API call entirely,
         # so this is a tiny first step in that migration.
-        if course_blocks:
-            user_course_outline = get_user_course_outline(
-                course_key, request.user, datetime.now(tz=timezone.utc)
-            )
-            available_seq_ids = {str(usage_key) for usage_key in user_course_outline.sequences}
-
-            available_section_ids = {str(section.usage_key) for section in user_course_outline.sections}
-
-            # course_blocks is a reference to the root of the course,
-            # so we go through the chapters (sections) and keep only those
-            # which are part of the outline.
-            course_blocks['children'] = [
-                chapter_data
-                for chapter_data in course_blocks.get('children', [])
-                if chapter_data['id'] in available_section_ids
-            ]
-
-            # course_blocks is a reference to the root of the course, so we go
-            # through the chapters (sections) to look for sequences to remove.
-            for chapter_data in course_blocks['children']:
-                chapter_data['children'] = [
-                    seq_data
-                    for seq_data in chapter_data['children']
-                    if (
-                        seq_data['id'] in available_seq_ids or
-                        # Edge case: Sometimes we have weird course structures.
-                        # We expect only sequentials here, but if there is
-                        # another type, just skip it (don't filter it out).
-                        seq_data['type'] != 'sequential'
-                    )
-                ] if 'children' in chapter_data else []
+        _filter_blocks_by_outline(course_blocks, course_key, request.user)
 
         user_has_passing_grade = False
         if not request.user.is_anonymous:
@@ -381,6 +430,90 @@ class OutlineTabView(RetrieveAPIView):
         response = super().finalize_response(request, response, *args, **kwargs)
         # Adding this header should be moved to global middleware, not just this endpoint
         return expose_header('Date', response)
+
+
+class CourseOutlineBlocksView(RetrieveAPIView):
+    """
+    **Use Cases**
+        Lazy-load the full course outline block tree with all metadata.
+        Called by the Learning MFE when the user expands a subsection or
+        clicks "Expand All" on the course outline page.
+
+    **Example Requests**
+        GET api/course_home/v1/outline_blocks/{course_key}
+
+    **Response Values**
+        For a good 200 response, the response will include:
+        blocks: Dict of serialized Course Block objects keyed by usage id.
+            Each block has the same shape as the outline tab's course_blocks,
+            including special_exam_info, effort, completion, gating, scored,
+            and num_graded_problems fields.
+
+    **Returns**
+        * 200 on success.
+        * 403 if the user does not currently have access to the course.
+        * 404 if the course is not available or cannot be seen.
+    """
+
+    authentication_classes = (
+        JwtAuthentication,
+        BearerAuthenticationAllowInactiveUser,
+        SessionAuthenticationAllowInactiveUser,
+    )
+    permission_classes = (IsAuthenticated,)
+
+    serializer_class = CourseBlockSerializer
+
+    def get(self, request, *args, **kwargs):
+        course_key_string = kwargs.get('course_key_string')
+        course_key = CourseKey.from_string(course_key_string)
+
+        # Enable NR tracing for this view based on course
+        monitoring_utils.set_custom_attribute('course_id', course_key_string)
+        monitoring_utils.set_custom_attribute('user_id', request.user.id)
+        monitoring_utils.set_custom_attribute('is_staff', request.user.is_staff)
+
+        course = get_course_or_403(request.user, 'load', course_key, check_if_enrolled=False)
+
+        masquerade_object, request.user = setup_masquerade(
+            request,
+            course_key,
+            staff_access=has_access(request.user, 'staff', course_key),
+            reset_masquerade_data=True,
+        )
+
+        user_is_masquerading = is_masquerading(request.user, course_key, course_masquerade=masquerade_object)
+
+        enrollment = CourseEnrollment.get_enrollment(request.user, course_key)
+        allow_anonymous = COURSE_ENABLE_UNENROLLED_ACCESS_FLAG.is_enabled(course_key)
+        allow_public = allow_anonymous and course.course_visibility == COURSE_VISIBILITY_PUBLIC
+        allow_public_outline = allow_anonymous and course.course_visibility == COURSE_VISIBILITY_PUBLIC_OUTLINE
+
+        is_enrolled = enrollment and enrollment.is_active
+        is_staff = bool(has_access(request.user, 'staff', course_key))
+        show_enrolled = is_enrolled or is_staff
+
+        course_blocks = None
+        if show_enrolled:
+            course_blocks = get_course_outline_block_tree(request, course_key_string, request.user)
+        elif allow_public_outline or allow_public or user_is_masquerading:
+            course_blocks = get_course_outline_block_tree(request, course_key_string, None)
+
+        _filter_blocks_by_outline(course_blocks, course_key, request.user)
+
+        if course_blocks is None:
+            return Response({'blocks': {}})
+
+        context = self.get_serializer_context()
+        context.update({
+            'include_vertical': False,
+            'extra_fields': ['special_exam_info'],
+            'enable_links': show_enrolled or allow_public,
+        })
+
+        serializer = self.get_serializer_class()(course_blocks, context=context)
+
+        return Response(serializer.data)
 
 
 class CourseNavigationBlocksView(RetrieveAPIView):

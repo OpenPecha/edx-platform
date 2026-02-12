@@ -10,6 +10,7 @@ from lms.djangoapps.course_home_api.course_metadata.views import CourseHomeMetad
 from lms.djangoapps.course_home_api.dates.views import DatesTabView
 from lms.djangoapps.course_home_api.outline.views import (
     CourseNavigationBlocksView,
+    CourseOutlineBlocksView,
     OutlineTabView,
     dismiss_welcome_message,
     save_course_goal,
@@ -47,6 +48,11 @@ urlpatterns += [
         fr'outline/{settings.COURSE_KEY_PATTERN}',
         OutlineTabView.as_view(),
         name='outline-tab'
+    ),
+    re_path(
+        fr'outline_blocks/{settings.COURSE_KEY_PATTERN}',
+        CourseOutlineBlocksView.as_view(),
+        name='course-outline-blocks'
     ),
     re_path(
         fr'navigation/{settings.COURSE_KEY_PATTERN}',
