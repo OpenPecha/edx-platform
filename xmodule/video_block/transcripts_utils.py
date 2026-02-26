@@ -634,6 +634,16 @@ def get_video_transcript_content(edx_video_id, language_code):
     if edxval_api and edx_video_id:
         try:
             transcript = edxval_api.get_video_transcript_data(edx_video_id, language_code)
+        except FileNotFoundError:
+            log.warning(
+                f"Transcript file not found for edx-val id: {edx_video_id}, language code: {language_code}. "
+                f"Using fallback error transcript."
+            )
+            content = '{"start": [1],"end": [2],"text": ["An error occured obtaining the transcript."]}'
+            transcript = dict(
+                file_name='error-{edx_video_id}-{language_code}.srt',
+                content=Transcript.convert(content, 'sjson', 'srt')
+            )
         except ValueError:
             log.exception(
                 f"Error getting transcript from edx-val id: {edx_video_id}: language code {language_code}"
