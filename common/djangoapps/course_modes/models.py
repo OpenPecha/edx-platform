@@ -928,6 +928,34 @@ def get_course_prices(course, verified_only=False):
     return registration_price, format_course_price(price)
 
 
+def get_course_display_price(course):
+    """
+    Return the course price using the paid mode's OWN currency (e.g. "₹1000"),
+    or 'Free' when there is no paid mode.
+
+    Unlike get_course_prices(), this does not force PAID_COURSE_REGISTRATION_CURRENCY,
+    so courses priced in any currency (INR, EUR, ...) display correctly instead of "Free".
+    """
+    from babel.numbers import get_currency_symbol
+
+    paid_mode = None
+    for mode in CourseMode.modes_for_course(course.id):
+        if mode.min_price and mode.min_price > 0:
+            if mode.slug == CourseMode.VERIFIED:
+                paid_mode = mode
+                break
+            if paid_mode is None:
+                paid_mode = mode
+
+    if not paid_mode:
+        # No paid mode: keep existing behaviour (handles cosmetic_display_price / "Free").
+        _, price = get_course_prices(course)
+        return price
+
+    symbol = get_currency_symbol((paid_mode.currency or 'usd').upper())
+    return f"{symbol}{paid_mode.min_price}"
+
+
 def format_course_price(price):
     """
     Return a formatted price for a course (a string preceded by correct currency, or 'Free').
