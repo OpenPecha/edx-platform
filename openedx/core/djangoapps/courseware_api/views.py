@@ -25,7 +25,7 @@ from xmodule.modulestore.exceptions import ItemNotFoundError, NoPathToItem
 from xmodule.modulestore.search import path_to_location
 from xmodule.x_module import PUBLIC_VIEW, STUDENT_VIEW
 
-from common.djangoapps.course_modes.models import CourseMode, get_course_prices
+from common.djangoapps.course_modes.models import CourseMode, get_course_prices, get_course_display_price
 from common.djangoapps.util.views import expose_header
 from lms.djangoapps.edxnotes.helpers import is_feature_enabled
 from lms.djangoapps.certificates.api import get_certificate_url
@@ -499,10 +499,9 @@ class CoursewareMeta:
     @property
     def course_price(self):
         """
-        Returns the course price, formatted with the currency symbol.
+        Returns the course price, formatted with the course mode's own currency symbol.
         """
-        _, course_price = get_course_prices(self.course)
-        return course_price
+        return get_course_display_price(self.course)
 
     @property
     def pre_requisite_courses(self):
