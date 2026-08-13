@@ -81,6 +81,17 @@ class PrerequisiteCourseSerializer(serializers.Serializer):
     display = serializers.CharField()
 
 
+class InstructorSerializer(serializers.Serializer):  # pylint: disable=abstract-method
+    """
+    Serializer for a single course instructor.
+    """
+    name = serializers.CharField(allow_blank=True, allow_null=True, default='')
+    title = serializers.CharField(allow_blank=True, allow_null=True, default='')
+    organization = serializers.CharField(allow_blank=True, allow_null=True, default='')
+    image = serializers.CharField(allow_blank=True, allow_null=True, default='')
+    bio = serializers.CharField(allow_blank=True, allow_null=True, default='')
+
+
 class CourseInfoSerializer(serializers.Serializer):  # pylint: disable=abstract-method
     """
     Serializer for Course objects providing minimal data about the course.
@@ -155,6 +166,42 @@ class CourseInfoSerializer(serializers.Serializer):  # pylint: disable=abstract-
     display_number_with_default = serializers.CharField()
     display_org_with_default = serializers.CharField()
     overview = serializers.CharField(
+        allow_blank=True,
+        allow_null=True,
+        default=None,
+    )
+    description = serializers.CharField(
+        allow_blank=True,
+        allow_null=True,
+        default=None,
+    )
+    learning_info = serializers.ListField(
+        child=serializers.CharField(),
+        allow_empty=True,
+        default=list,
+    )
+    instructor_info = serializers.ListField(
+        child=InstructorSerializer(),
+        allow_empty=True,
+        default=list,
+    )
+    duration = serializers.CharField(
+        allow_blank=True,
+        allow_null=True,
+        default=None,
+    )
+    enrolled_students_count = serializers.IntegerField(default=0)
+    requirements = serializers.CharField(
+        allow_blank=True,
+        allow_null=True,
+        default=None,
+    )
+    prerequisites = serializers.CharField(
+        allow_blank=True,
+        allow_null=True,
+        default=None,
+    )
+    ocw_links = serializers.CharField(
         allow_blank=True,
         allow_null=True,
         default=None,

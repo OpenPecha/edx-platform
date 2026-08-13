@@ -66,6 +66,12 @@ from openedx.core.djangoapps.programs.utils import ProgramProgressMeter
 from openedx.core.djangolib.markup import clean_dangerous_html
 from openedx.core.lib.api.authentication import BearerAuthenticationAllowInactiveUser
 from openedx.core.lib.api.view_utils import DeveloperErrorViewMixin
+from openedx.core.lib.course_about import (
+    get_course_duration,
+    get_course_instructors,
+    get_course_learning_outcomes,
+    get_course_requirement,
+)
 from openedx.core.lib.courses import get_course_by_id
 from openedx.features.course_experience import ENABLE_COURSE_GOALS
 from openedx.features.course_experience.waffle import ENABLE_COURSE_ABOUT_SIDEBAR_HTML
@@ -530,6 +536,69 @@ class CoursewareMeta:
             get_course_about_section(self.request, self.course, "overview")
         )
 
+    @property
+    def description(self):
+        """
+        Returns the long description HTML content for the course.
+        """
+        return clean_dangerous_html(
+            get_course_about_section(self.request, self.course, "description")
+        )
+
+    @property
+    def learning_info(self):
+        """
+        Returns the list of learning outcomes ("what you will learn") for the course.
+        """
+        return get_course_learning_outcomes(self.course)
+
+    @property
+    def instructor_info(self):
+        """
+        Returns the list of instructors for the course, normalized to a list of dicts
+        each containing name, title, organization, image and bio.
+        """
+        return get_course_instructors(self.course, self.request)
+
+    @property
+    def duration(self):
+        """
+        Returns the estimated course duration (e.g. "6 weeks"), if set.
+        """
+        return get_course_duration(self.course)
+
+    @property
+    def enrolled_students_count(self):
+        """
+        Returns the number of students enrolled in the course, excluding admins.
+        """
+        return CourseEnrollment.objects.num_enrolled_in_exclude_admins(self.course_key)
+
+    @property
+    def requirements(self):
+        """
+        Returns the course requirements text (the extended "marketing" course title).
+        """
+        return get_course_requirement(self.course.id)
+
+    @property
+    def prerequisites(self):
+        """
+        Returns the course prerequisites HTML content, if set.
+        """
+        return clean_dangerous_html(
+            get_course_about_section(self.request, self.course, "prerequisites")
+        )
+
+    @property
+    def ocw_links(self):
+        """
+        Returns the OCW (OpenCourseWare) additional-resources HTML content, if set.
+        """
+        return clean_dangerous_html(
+            get_course_about_section(self.request, self.course, "ocw_links")
+        )
+
 
 @method_decorator(transaction.non_atomic_requests, name='dispatch')
 class CoursewareInformation(RetrieveAPIView):
@@ -657,6 +726,14 @@ class CoursewareInformation(RetrieveAPIView):
             * visible: Boolean indicating whether notes are visible in the course
         * marketing_url: The marketing URL for the course
         * overview: The overview HTML content for the course
+        * description: The long description HTML content for the course
+        * learning_info: A list of learning outcomes ("what you will learn") for the course
+        * instructor_info: A list of course instructors, each with name, title, organization, image and bio
+        * duration: The estimated course duration (e.g. "6 weeks")
+        * enrolled_students_count: The number of students enrolled in the course, excluding admins
+        * requirements: The course requirements text (the extended "marketing" course title)
+        * prerequisites: The course prerequisites HTML content
+        * ocw_links: The OCW additional-resources HTML content
         * license: The license for the course
 
     **Parameters:**
