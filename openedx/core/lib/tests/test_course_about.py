@@ -85,6 +85,13 @@ class GetCourseInstructorsTests(TestCase):
 
         self.assertEqual([i['name'] for i in result], ['Jane'])
 
+    def test_ignores_non_string_image(self):
+        course = _course(instructor_info={'instructors': [{'name': 'Jane', 'image': 42}]})
+
+        result = course_about.get_course_instructors(course, _FakeRequest())
+
+        self.assertEqual(result[0]['image'], '')
+
 
 class GetCourseLearningOutcomesTests(TestCase):
     """Tests for :func:`get_course_learning_outcomes`."""
@@ -128,6 +135,12 @@ class GetCourseDurationTests(TestCase):
         self.assertEqual(
             course_about.get_course_duration(_course(duration_value=1, duration_unit='weeks')),
             '1 week',
+        )
+
+    def test_formats_value_of_zero(self):
+        self.assertEqual(
+            course_about.get_course_duration(_course(duration_value=0, duration_unit='weeks')),
+            '0 weeks',
         )
 
 

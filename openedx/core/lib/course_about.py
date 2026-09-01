@@ -13,8 +13,12 @@ requirements) is passed through :func:`clean_dangerous_html` so that no endpoint
 can serve unsanitized markup.
 """
 
+import logging
+
 from openedx.core.djangoapps.models.course_details import CourseDetails
 from openedx.core.djangolib.markup import clean_dangerous_html
+
+log = logging.getLogger(__name__)
 
 
 def get_course_instructors(course, request=None):
@@ -42,18 +46,23 @@ def get_course_instructors(course, request=None):
     instructors = []
     for instructor in raw_instructors:
         if not isinstance(instructor, dict):
+            log.warning(
+                "Skipping malformed instructor entry (expected dict, got %s) for course %s",
+                type(instructor).__name__, getattr(course, 'id', None),
+            )
             continue
 
         image = instructor.get('image')
+        image = image if isinstance(image, str) else None
         if image and request is not None and not image.startswith(('http://', 'https://')):
             image = request.build_absolute_uri(image)
 
         instructors.append({
-            'name': instructor.get('name'),
-            'title': instructor.get('title'),
-            'organization': instructor.get('organization'),
-            'image': image,
-            'bio': clean_dangerous_html(instructor.get('bio')),
+            'name': instructor.get('name') or '',
+            'title': instructor.get('title') or '',
+            'organization': instructor.get('organization') or '',
+            'image': image or '',
+            'bio': clean_dangerous_html(instructor.get('bio')) or '',
         })
     return instructors
 
@@ -99,7 +108,7 @@ def get_course_duration(course):
 
     duration_value = getattr(course, 'duration_value', None)
     duration_unit = getattr(course, 'duration_unit', None)
-    if duration_value and duration_unit:
+    if duration_value is not None and duration_unit:
         unit = duration_unit
         # Singularize the unit for a single-value duration (e.g. "1 week", not "1 weeks").
         if duration_value == 1 and unit.endswith('s'):

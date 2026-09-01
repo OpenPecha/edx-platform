@@ -516,15 +516,21 @@ class CoursewareMeta:
         """
         return get_prerequisite_courses_display(self.course)
 
+    def _get_about_section(self, section_key):
+        """
+        Returns the sanitized HTML content for the given course about section key.
+        """
+        return clean_dangerous_html(
+            get_course_about_section(self.request, self.course, section_key)
+        )
+
     @property
     def about_sidebar_html(self):
         """
         Returns the HTML content for the course about section.
         """
         if ENABLE_COURSE_ABOUT_SIDEBAR_HTML.is_enabled():
-            return clean_dangerous_html(
-                get_course_about_section(self.request, self.course, "about_sidebar_html")
-            )
+            return self._get_about_section("about_sidebar_html")
         return None
 
     @property
@@ -532,18 +538,14 @@ class CoursewareMeta:
         """
         Returns the overview HTML content for the course.
         """
-        return clean_dangerous_html(
-            get_course_about_section(self.request, self.course, "overview")
-        )
+        return self._get_about_section("overview")
 
     @property
     def description(self):
         """
         Returns the long description HTML content for the course.
         """
-        return clean_dangerous_html(
-            get_course_about_section(self.request, self.course, "description")
-        )
+        return self._get_about_section("description")
 
     @property
     def learning_info(self):
@@ -586,18 +588,14 @@ class CoursewareMeta:
         """
         Returns the course prerequisites HTML content, if set.
         """
-        return clean_dangerous_html(
-            get_course_about_section(self.request, self.course, "prerequisites")
-        )
+        return self._get_about_section("prerequisites")
 
     @property
     def ocw_links(self):
         """
         Returns the OCW (OpenCourseWare) additional-resources HTML content, if set.
         """
-        return clean_dangerous_html(
-            get_course_about_section(self.request, self.course, "ocw_links")
-        )
+        return self._get_about_section("ocw_links")
 
 
 @method_decorator(transaction.non_atomic_requests, name='dispatch')
