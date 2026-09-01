@@ -10,6 +10,7 @@ from django.views.decorators.cache import cache_page
 from rest_framework import status
 from rest_framework.views import APIView
 
+from openedx.core.djangoapps.lang_pref.api import released_languages
 from openedx.core.djangoapps.site_configuration import helpers as configuration_helpers
 
 
@@ -88,10 +89,30 @@ class MFEConfigView(APIView):
             )
             mfe_config_overrides = app_config.get(mfe, {})
 
-        # Merge the three configs in the order of precedence
-        merged_config = legacy_config | mfe_config | mfe_config_overrides
+        # Languages released through DarkLangConfig, so MFEs can offer the same set the
+        # LMS does instead of each shipping its own hand-maintained list. Lowest
+        # precedence, so an operator can still pin the list through MFE_CONFIG.
+        language_config = self._get_language_config()
+
+        # Merge the configs in the order of precedence
+        merged_config = language_config | legacy_config | mfe_config | mfe_config_overrides
 
         return JsonResponse(merged_config, status=status.HTTP_200_OK)
+
+    @staticmethod
+    def _get_language_config() -> dict:
+        """
+        Return the languages released to learners, as ``{"code": ..., "name": ...}`` dicts.
+
+        ``name`` is the native name from ``settings.LANGUAGES`` (e.g. "Français"), which
+        may carry an English gloss - consumers are free to display their own label.
+        """
+        return {
+            "RELEASED_LANGUAGES": [
+                {"code": language.code, "name": language.name}
+                for language in released_languages()
+            ],
+        }
 
     @staticmethod
     def _get_legacy_config() -> dict:
