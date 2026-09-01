@@ -8,17 +8,36 @@ suitable for serialization.
 
 They are shared by the multiple course-detail APIs (e.g. the courseware API used by
 the catalog MFE and the course API used by the mobile app) so that this logic lives
-in exactly one place. All author-entered HTML (instructor bios, learning outcomes,
-requirements) is passed through :func:`clean_dangerous_html` so that no endpoint
-can serve unsanitized markup.
+in exactly one place. All author-entered text (instructor bios, learning outcomes,
+requirements) has any HTML tags stripped before being returned, so no endpoint can
+serve unsanitized markup.
 """
 
 import logging
 
+import nh3
+
 from openedx.core.djangoapps.models.course_details import CourseDetails
-from openedx.core.djangolib.markup import clean_dangerous_html
 
 log = logging.getLogger(__name__)
+
+
+def sanitize_plain_text(text):
+    """
+    Strip any HTML tags from ``text`` without wrapping the remaining content in markup.
+
+    Unlike :func:`clean_dangerous_html` (which parses its input as an HTML document and
+    always emits well-formed HTML, e.g. wrapping bare text in ``<p>...</p>``), this is
+    for short, plain-text author fields (instructor names/bios, learning outcomes,
+    requirements) where the caller expects plain text back, not an HTML fragment.
+
+    Public so callers that already have their own cached/batched fetch for the raw
+    value (e.g. the course API's per-instance about-attribute cache) can sanitize it
+    without going through a second, uncached fetch.
+    """
+    if not text:
+        return text
+    return nh3.clean(text, tags=set())
 
 
 def get_course_instructors(course, request=None):
@@ -62,7 +81,7 @@ def get_course_instructors(course, request=None):
             'title': instructor.get('title') or '',
             'organization': instructor.get('organization') or '',
             'image': image or '',
-            'bio': clean_dangerous_html(instructor.get('bio')) or '',
+            'bio': sanitize_plain_text(instructor.get('bio')) or '',
         })
     return instructors
 
@@ -84,7 +103,7 @@ def get_course_learning_outcomes(course):
 
     outcomes = getattr(course, 'learning_info', []) or []
     return [
-        clean_dangerous_html(outcome)
+        sanitize_plain_text(outcome)
         for outcome in outcomes
         if isinstance(outcome, str) and outcome.strip()
     ]
@@ -130,4 +149,4 @@ def get_course_requirement(course_key):
     Returns:
         str or None: The sanitized requirements text, or ``None`` when it is not set.
     """
-    return clean_dangerous_html(CourseDetails.fetch_about_attribute(course_key, 'title'))
+    return sanitize_plain_text(CourseDetails.fetch_about_attribute(course_key, 'title'))

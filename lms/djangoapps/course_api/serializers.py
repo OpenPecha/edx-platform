@@ -237,7 +237,7 @@ class CourseDetailSerializer(CourseSerializer):  # pylint: disable=abstract-meth
         This maps to the CourseDetails "title" marketing field in Studio,
         which in this deployment is used to capture course requirements.
         """
-        return course_about.get_course_requirement(course_overview.id)
+        return course_about.sanitize_plain_text(self._get_about_attribute(course_overview, 'title'))
 
     def get_description(self, course_overview):
         """
