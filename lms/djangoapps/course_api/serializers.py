@@ -16,6 +16,7 @@ from lms.djangoapps.certificates.api import can_show_certificate_available_date_
 from openedx.core.djangoapps.content.course_overviews.models import \
     CourseOverview  # lint-amnesty, pylint: disable=unused-import
 from openedx.core.djangoapps.models.course_details import CourseDetails
+from openedx.core.lib import course_about
 from openedx.core.lib.api.fields import AbsoluteURLField
 from xmodule.modulestore.django import modulestore
 
@@ -145,19 +146,7 @@ class CourseSerializer(serializers.Serializer):  # pylint: disable=abstract-meth
         """
         Get the course duration from course details.
         """
-        course_details = self._get_cached_course_details(course_overview)
-        duration_value = getattr(course_details, "duration_value", None)
-        duration_unit = getattr(course_details, "duration_unit", None)
-        if course_details and duration_value and duration_unit:
-            value = duration_value
-            unit = duration_unit
-
-            # Singularize if needed
-            if value == 1 and unit.endswith("s"):
-                unit = unit[:-1]
-
-            return f"{value} {unit}"
-        return None
+        return course_about.get_course_duration(self._get_cached_course_details(course_overview))
 
     def _get_cached_course_details(self, course_overview):
         """
@@ -248,8 +237,7 @@ class CourseDetailSerializer(CourseSerializer):  # pylint: disable=abstract-meth
         This maps to the CourseDetails "title" marketing field in Studio,
         which in this deployment is used to capture course requirements.
         """
-        # Studio stores this value in the "title" about attribute; we expose it as Course Requirement.
-        return self._get_about_attribute(course_overview, 'title')
+        return course_about.sanitize_plain_text(self._get_about_attribute(course_overview, 'title'))
 
     def get_description(self, course_overview):
         """
@@ -262,44 +250,18 @@ class CourseDetailSerializer(CourseSerializer):  # pylint: disable=abstract-meth
         """
         Return learning outcomes as a list of strings from CourseDetails.learning_info.
         """
-        course_details = self._get_cached_course_details(course_overview)
-        outcomes = getattr(course_details, 'learning_info', None) if course_details else None
-        # Ensure we only return list[str] or None
-        if isinstance(outcomes, (list, tuple)):
-            return [o for o in outcomes if isinstance(o, str)]
-        return None
+        return course_about.get_course_learning_outcomes(
+            self._get_cached_course_details(course_overview)
+        ) or None
 
     def get_instructors(self, course_overview):
         """
-        Return instructor details excluding media. Each item includes
-        name, title, organization, and bio.
+        Return instructor details including name, title, organization, bio and image.
         """
-        course_details = self._get_cached_course_details(course_overview)
-        instructor_info = getattr(course_details, 'instructor_info', None) if course_details else None
-        instructors = []
         request = self.context.get('request') if self.context else None
-        absolute_url_field = AbsoluteURLField() if request else None
-        if absolute_url_field:
-            absolute_url_field._context = {'request': request}  # lint-amnesty, pylint: disable=protected-access
-        try:
-            raw_list = (instructor_info or {}).get('instructors', [])
-        except AttributeError:
-            raw_list = []
-        for ins in raw_list:
-            if not isinstance(ins, dict):
-                continue
-            image_url = ins.get('image')
-            if image_url:
-                if absolute_url_field:
-                    image_url = absolute_url_field.to_representation(image_url)
-            instructors.append({
-                'name': ins.get('name'),
-                'title': ins.get('title'),
-                'organization': ins.get('organization'),
-                'bio': ins.get('bio'),
-                'image': image_url,
-            })
-        return instructors or None
+        return course_about.get_course_instructors(
+            self._get_cached_course_details(course_overview), request
+        ) or None
 
     def get_purchase_link(self, course_overview):
         """
