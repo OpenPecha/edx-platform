@@ -11,6 +11,9 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from common.djangoapps.student.tests.factories import UserFactory
+from openedx.core.djangoapps.dark_lang.models import DarkLangConfig
+
 # Default legacy configuration values, used in tests to build a correct expected response
 default_legacy_config = {
     "COURSE_ABOUT_TWITTER_ACCOUNT": "@YourPlatformTwitterAccount",
@@ -20,6 +23,15 @@ default_legacy_config = {
     "HOMEPAGE_PROMO_VIDEO_YOUTUBE_ID": None,
     "ENABLE_COURSE_DISCOVERY": False,
 }
+
+# DarkLangConfig is empty in tests, so released_languages() falls back to
+# settings.LANGUAGE_CODE on its own.
+default_language_config = {
+    "RELEASED_LANGUAGES": [{"code": "en", "name": "English"}],
+}
+
+# Every response carries the language block alongside the legacy one.
+default_config = {**default_language_config, **default_legacy_config}
 
 
 @ddt.ddt
@@ -50,7 +62,7 @@ class MFEConfigTestCase(APITestCase):
 
         response = self.client.get(self.mfe_config_api_url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.json(), {**default_legacy_config, "EXAMPLE_VAR": "value"})
+        self.assertEqual(response.json(), {**default_config, "EXAMPLE_VAR": "value"})
 
     @patch("lms.djangoapps.mfe_config_api.views.configuration_helpers")
     def test_get_mfe_config_with_queryparam(self, configuration_helpers_mock):
@@ -76,7 +88,7 @@ class MFEConfigTestCase(APITestCase):
                  call("MFE_CONFIG_OVERRIDES", settings.MFE_CONFIG_OVERRIDES)]
         configuration_helpers_mock.get_value.assert_has_calls(calls)
         self.assertEqual(
-            response.json(), {**default_legacy_config, "EXAMPLE_VAR": "mymfe_value", "OTHER": "other"}
+            response.json(), {**default_config, "EXAMPLE_VAR": "mymfe_value", "OTHER": "other"}
         )
 
     @ddt.unpack
@@ -84,32 +96,32 @@ class MFEConfigTestCase(APITestCase):
         dict(
             mfe_config={},
             mfe_config_overrides={},
-            expected_response={**default_legacy_config},
+            expected_response={**default_config},
         ),
         dict(
             mfe_config={"EXAMPLE_VAR": "value"},
             mfe_config_overrides={},
-            expected_response={**default_legacy_config, "EXAMPLE_VAR": "value"},
+            expected_response={**default_config, "EXAMPLE_VAR": "value"},
         ),
         dict(
             mfe_config={},
             mfe_config_overrides={"mymfe": {"EXAMPLE_VAR": "mymfe_value"}},
-            expected_response={**default_legacy_config, "EXAMPLE_VAR": "mymfe_value"},
+            expected_response={**default_config, "EXAMPLE_VAR": "mymfe_value"},
         ),
         dict(
             mfe_config={"EXAMPLE_VAR": "value"},
             mfe_config_overrides={"mymfe": {"EXAMPLE_VAR": "mymfe_value"}},
-            expected_response={**default_legacy_config, "EXAMPLE_VAR": "mymfe_value"},
+            expected_response={**default_config, "EXAMPLE_VAR": "mymfe_value"},
         ),
         dict(
             mfe_config={"EXAMPLE_VAR": "value", "OTHER": "other"},
             mfe_config_overrides={"mymfe": {"EXAMPLE_VAR": "mymfe_value"}},
-            expected_response={**default_legacy_config, "EXAMPLE_VAR": "mymfe_value", "OTHER": "other"},
+            expected_response={**default_config, "EXAMPLE_VAR": "mymfe_value", "OTHER": "other"},
         ),
         dict(
             mfe_config={"EXAMPLE_VAR": "value"},
             mfe_config_overrides={"yourmfe": {"EXAMPLE_VAR": "yourmfe_value"}},
-            expected_response={**default_legacy_config, "EXAMPLE_VAR": "value"},
+            expected_response={**default_config, "EXAMPLE_VAR": "value"},
         ),
         dict(
             mfe_config={"EXAMPLE_VAR": "value"},
@@ -117,7 +129,7 @@ class MFEConfigTestCase(APITestCase):
                 "yourmfe": {"EXAMPLE_VAR": "yourmfe_value"},
                 "mymfe": {"EXAMPLE_VAR": "mymfe_value"},
             },
-            expected_response={**default_legacy_config, "EXAMPLE_VAR": "mymfe_value"},
+            expected_response={**default_config, "EXAMPLE_VAR": "mymfe_value"},
         ),
     )
     @patch("lms.djangoapps.mfe_config_api.views.configuration_helpers")
@@ -161,7 +173,7 @@ class MFEConfigTestCase(APITestCase):
         - The json response is equal to MFE_CONFIG in lms/envs/test.py"""
         response = self.client.get(self.mfe_config_api_url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.json(), default_legacy_config | settings.MFE_CONFIG)
+        self.assertEqual(response.json(), default_config | settings.MFE_CONFIG)
 
     def test_get_mfe_config_with_queryparam_from_django_settings(self):
         """Test that when there is no site configuration, the API with queryparam takes the django settings.
@@ -172,8 +184,31 @@ class MFEConfigTestCase(APITestCase):
         """
         response = self.client.get(f"{self.mfe_config_api_url}?mfe=mymfe")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        expected = default_legacy_config | settings.MFE_CONFIG | settings.MFE_CONFIG_OVERRIDES["mymfe"]
+        expected = default_config | settings.MFE_CONFIG | settings.MFE_CONFIG_OVERRIDES["mymfe"]
         self.assertEqual(response.json(), expected)
+
+    def test_released_languages_follow_dark_lang_config(self):
+        """Test that RELEASED_LANGUAGES reflects the languages released in DarkLangConfig.
+
+        Expected result:
+        - Every language released through DarkLangConfig is listed, with the native name
+        from settings.LANGUAGES.
+        - A code that is not in settings.LANGUAGES is dropped rather than reported.
+        """
+        user = UserFactory.create()
+        DarkLangConfig(released_languages="fr, eo, nonexistent-code", enabled=True, changed_by=user).save()
+
+        response = self.client.get(self.mfe_config_api_url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.json()["RELEASED_LANGUAGES"],
+            [
+                {"code": "en", "name": "English"},
+                {"code": "eo", "name": "Dummy Language (Esperanto)"},
+                {"code": "fr", "name": "Français"},
+            ],
+        )
 
     @patch("lms.djangoapps.mfe_config_api.views.configuration_helpers")
     @override_settings(ENABLE_MFE_CONFIG_API=False)
